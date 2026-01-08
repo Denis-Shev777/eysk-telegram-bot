@@ -1,0 +1,11 @@
+# secrets
+tg token.txt
+.env
+
+# runtime data
+users.db
+__pycache__/
+*.pyc
+
+# logs
+*.log
