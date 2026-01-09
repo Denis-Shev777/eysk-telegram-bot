@@ -28,6 +28,9 @@ user_filters = {}
 # Временное хранилище данных пагинации (для кнопки "Показать еще")
 user_pagination_data = {}
 
+# Временное хранилище результатов поиска (для пользователей без подписки)
+user_search_results = {}
+
 
 def is_payment_time():
     """Проверка, доступна ли оплата в текущее время (11:00-23:00 МСК)"""
@@ -44,44 +47,33 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     db.add_user(user.id, user.username, user.first_name)
     
-    # Проверяем подписку
+    # Проверяем подписку для информации
     has_subscription, end_date = db.check_subscription(user.id)
     
+    # Приветствие
     if has_subscription:
-        # Приветствие
         await update.message.reply_text(
             f"{WELCOME_TEXT}\n\n"
             f"✅ Подписка активна до {end_date.strftime('%d.%m.%Y %H:%M')}"
         )
-        
-        # Инициализируем фильтры
-        user_filters[user.id] = {}
-        
-        # ПЕРВЫЙ ВОПРОС - выбор населённого пункта
-        keyboard = [
-            [InlineKeyboardButton("🏖️ Ейск", callback_data='location_ейск')],
-            [InlineKeyboardButton("🌊 Должанская", callback_data='location_должанская')]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        await update.message.reply_text(
-            "🔍 Давай найдем идеальное жилье!\n\n"
-            "1️⃣ Выбери населённый пункт:",
-            reply_markup=reply_markup
-        )
     else:
-        keyboard = [
-            [InlineKeyboardButton(f"💳 {TARIFFS['1_day']['name']} - {TARIFFS['1_day']['price']}₽", 
-                                 callback_data='buy_1_day')],
-            [InlineKeyboardButton(f"💳 {TARIFFS['7_days']['name']} - {TARIFFS['7_days']['price']}₽", 
-                                 callback_data='buy_7_days')]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        await update.message.reply_text(
-            f"{WELCOME_TEXT}\n{SUBSCRIPTION_REQUIRED}",
-            reply_markup=reply_markup
-        )
+        await update.message.reply_text(WELCOME_TEXT)
+    
+    # Инициализируем фильтры для всех пользователей
+    user_filters[user.id] = {}
+    
+    # ПЕРВЫЙ ВОПРОС - выбор населённого пункта (для всех)
+    keyboard = [
+        [InlineKeyboardButton("🏖️ Ейск", callback_data='location_ейск')],
+        [InlineKeyboardButton("🌊 Должанская", callback_data='location_должанская')]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    await update.message.reply_text(
+        "🔍 Давай найдем идеальное жилье!\n\n"
+        "1️⃣ Выбери населённый пункт:",
+        reply_markup=reply_markup
+    )
 
 
 async def buy_subscription(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -231,24 +223,7 @@ async def search_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Начало поиска жилья"""
     user_id = update.effective_user.id
     
-    # Проверка подписки
-    has_subscription, end_date = db.check_subscription(user_id)
-    if not has_subscription:
-        keyboard = [
-            [InlineKeyboardButton(f"💳 {TARIFFS['1_day']['name']} - {TARIFFS['1_day']['price']}₽", 
-                                 callback_data='buy_1_day')],
-            [InlineKeyboardButton(f"💳 {TARIFFS['7_days']['name']} - {TARIFFS['7_days']['price']}₽", 
-                                 callback_data='buy_7_days')]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        await update.message.reply_text(
-            "⚠️ Для поиска жилья нужна активная подписка.\n\n"
-            "Выбери тариф:",
-            reply_markup=reply_markup
-        )
-        return
-    
-    # Инициализируем фильтры
+    # Инициализируем фильтры для всех
     user_filters[user_id] = {}
     
     # ПЕРВЫЙ ВОПРОС - выбор населённого пункта
@@ -411,7 +386,7 @@ async def select_location(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await context.bot.send_message(
                 chat_id=user_id,
                 text="😔 К сожалению, в Должанской пока нет объявлений.\n\n"
-                     "Попробуй поискать в Ейске и Должанской:",
+                     "Попробуй поискать в Ейске:",
                 reply_markup=InlineKeyboardMarkup([[
                     InlineKeyboardButton("🔍 Новый поиск", callback_data='new_search')
                 ]])
@@ -420,12 +395,39 @@ async def select_location(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 del user_filters[user_id]
             return
         
-        # Показываем результаты
-        await show_results_function(context, user_id, filtered)
+        # Проверяем подписку
+        has_subscription, end_date = db.check_subscription(user_id)
         
-        # Очищаем фильтры
-        if user_id in user_filters:
-            del user_filters[user_id]
+        if has_subscription:
+            # Если есть подписка - показываем результаты
+            await show_results_function(context, user_id, filtered)
+            
+            # Очищаем фильтры
+            if user_id in user_filters:
+                del user_filters[user_id]
+        else:
+            # Если нет подписки - показываем количество и предлагаем оплатить
+            # Сохраняем результаты для показа после оплаты
+            user_search_results[user_id] = filtered
+            
+            keyboard = [
+                [InlineKeyboardButton(f"💳 {TARIFFS['1_day']['name']} - {TARIFFS['1_day']['price']}₽", 
+                                     callback_data='buy_1_day')],
+                [InlineKeyboardButton(f"💳 {TARIFFS['7_days']['name']} - {TARIFFS['7_days']['price']}₽", 
+                                     callback_data='buy_7_days')],
+                [InlineKeyboardButton("🔍 Новый поиск", callback_data='new_search')]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            await context.bot.send_message(
+                chat_id=user_id,
+                text=f"✅ Найдено вариантов: {len(filtered)}\n\n"
+                     f"Для просмотра контактов и фотографий жилья нужна подписка.\n\n"
+                     f"Выбери тариф:",
+                reply_markup=reply_markup
+            )
+            
+            # НЕ очищаем фильтры - они могут пригодиться
     
     # Если выбран Ейск - задаём вопросы
     else:
@@ -630,12 +632,39 @@ async def select_distance(update: Update, context: ContextTypes.DEFAULT_TYPE):
             del user_filters[user_id]
         return
     
-    # Показываем результаты через общую функцию
-    await show_results_function(context, user_id, filtered)
+    # Проверяем подписку
+    has_subscription, end_date = db.check_subscription(user_id)
     
-    # Очищаем фильтры
-    if user_id in user_filters:
-        del user_filters[user_id]
+    if has_subscription:
+        # Если есть подписка - показываем результаты
+        await show_results_function(context, user_id, filtered)
+        
+        # Очищаем фильтры
+        if user_id in user_filters:
+            del user_filters[user_id]
+    else:
+        # Если нет подписки - показываем количество и предлагаем оплатить
+        # Сохраняем результаты для показа после оплаты
+        user_search_results[user_id] = filtered
+        
+        keyboard = [
+            [InlineKeyboardButton(f"💳 {TARIFFS['1_day']['name']} - {TARIFFS['1_day']['price']}₽", 
+                                 callback_data='buy_1_day')],
+            [InlineKeyboardButton(f"💳 {TARIFFS['7_days']['name']} - {TARIFFS['7_days']['price']}₽", 
+                                 callback_data='buy_7_days')],
+            [InlineKeyboardButton("🔍 Новый поиск", callback_data='new_search')]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await context.bot.send_message(
+            chat_id=user_id,
+            text=f"✅ Найдено вариантов: {len(filtered)}\n\n"
+                 f"Для просмотра контактов и фотографий жилья нужна подписка.\n\n"
+                 f"Выбери тариф:",
+            reply_markup=reply_markup
+        )
+        
+        # НЕ очищаем фильтры - они могут пригодиться
 
 
 async def select_pets(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -747,14 +776,40 @@ async def show_results(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if user_id in user_filters:
             del user_filters[user_id]
         return
+    
+    # Проверяем подписку
+    has_subscription, end_date = db.check_subscription(user_id)
+    
+    if has_subscription:
+        # Если есть подписка - показываем результаты
+        await show_results_function(context, user_id, filtered)
         
-    
-    # Показываем результаты через общую функцию
-    await show_results_function(context, user_id, filtered)
-    
-    # Очищаем фильтры
-    if user_id in user_filters:
-        del user_filters[user_id]
+        # Очищаем фильтры
+        if user_id in user_filters:
+            del user_filters[user_id]
+    else:
+        # Если нет подписки - показываем количество и предлагаем оплатить
+        # Сохраняем результаты для показа после оплаты
+        user_search_results[user_id] = filtered
+        
+        keyboard = [
+            [InlineKeyboardButton(f"💳 {TARIFFS['1_day']['name']} - {TARIFFS['1_day']['price']}₽", 
+                                 callback_data='buy_1_day')],
+            [InlineKeyboardButton(f"💳 {TARIFFS['7_days']['name']} - {TARIFFS['7_days']['price']}₽", 
+                                 callback_data='buy_7_days')],
+            [InlineKeyboardButton("🔍 Новый поиск", callback_data='new_search')]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await context.bot.send_message(
+            chat_id=user_id,
+            text=f"✅ Найдено вариантов: {len(filtered)}\n\n"
+                 f"Для просмотра контактов и фотографий жилья нужна подписка.\n\n"
+                 f"Выбери тариф:",
+            reply_markup=reply_markup
+        )
+        
+        # НЕ очищаем фильтры - они могут пригодиться
     
     
 
@@ -809,32 +864,51 @@ async def admin_activate_handler(update: Update, context: ContextTypes.DEFAULT_T
             f"До: {end_date.strftime('%d.%m.%Y %H:%M')}"
         )
         
-        # Уведомляем пользователя и запускаем поиск
+        # Уведомляем пользователя
         try:
             tariff_name = f"{days} " + ("день" if days == 1 else "дней")
             await context.bot.send_message(
                 chat_id=user_id,
                 text=f"🎉 Подписка активирована!\n\n"
                      f"Тариф: {tariff_name}\n"
-                     f"Активна до: {end_date.strftime('%d.%m.%Y %H:%M')}\n\n"
-                     f"🔍 Давай найдем жилье для тебя!"
+                     f"Активна до: {end_date.strftime('%d.%m.%Y %H:%M')}"
             )
             
-            # Инициализируем фильтры
-            user_filters[user_id] = {}
-            
-            # Запускаем поиск автоматически
-            keyboard = [
-                [InlineKeyboardButton("🏖️ Ейск", callback_data='location_ейск')],
-                [InlineKeyboardButton("🌊 Должанская", callback_data='location_должанская')]
-            ]
-            reply_markup = InlineKeyboardMarkup(keyboard)
-            
-            await context.bot.send_message(
-                chat_id=user_id,
-                text="1️⃣ Выбери населённый пункт:",
-                reply_markup=reply_markup
-            )
+            # Проверяем есть ли сохраненные результаты поиска
+            if user_id in user_search_results:
+                # Есть сохраненные результаты - показываем их
+                filtered = user_search_results[user_id]
+                
+                await context.bot.send_message(
+                    chat_id=user_id,
+                    text=f"🔍 Вот результаты твоего поиска ({len(filtered)} вариантов):"
+                )
+                
+                await show_results_function(context, user_id, filtered)
+                
+                # Очищаем сохраненные результаты
+                del user_search_results[user_id]
+                
+                # Очищаем фильтры
+                if user_id in user_filters:
+                    del user_filters[user_id]
+            else:
+                # Нет сохраненных результатов - начинаем новый поиск
+                # Инициализируем фильтры
+                user_filters[user_id] = {}
+                
+                # Запускаем поиск автоматически
+                keyboard = [
+                    [InlineKeyboardButton("🏖️ Ейск", callback_data='location_ейск')],
+                    [InlineKeyboardButton("🌊 Должанская", callback_data='location_должанская')]
+                ]
+                reply_markup = InlineKeyboardMarkup(keyboard)
+                
+                await context.bot.send_message(
+                    chat_id=user_id,
+                    text="🔍 Давай найдем жилье для тебя!\n\n1️⃣ Выбери населённый пункт:",
+                    reply_markup=reply_markup
+                )
         except Exception as e:
             print(f"Ошибка при уведомлении пользователя: {e}")
             
@@ -1012,46 +1086,34 @@ async def go_start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = query.from_user.id
     user = query.from_user
     
-    # Проверяем подписку
+    # Проверяем подписку для информации
     has_subscription, end_date = db.check_subscription(user_id)
     
+    # Приветствие
     if has_subscription:
-        # Если есть подписка - показываем приветствие и сразу начинаем поиск
         await query.edit_message_text(
             f"{WELCOME_TEXT}\n\n"
             f"✅ Подписка активна до {end_date.strftime('%d.%m.%Y %H:%M')}"
         )
-        
-        # Инициализируем фильтры
-        user_filters[user_id] = {}
-        
-        # Показываем выбор населённого пункта
-        keyboard = [
-            [InlineKeyboardButton("🏖️ Ейск", callback_data='location_ейск')],
-            [InlineKeyboardButton("🌊 Должанская", callback_data='location_должанская')]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        await context.bot.send_message(
-            chat_id=user_id,
-            text="🔍 Давай найдем идеальное жилье!\n\n"
-                 "1️⃣ Выбери населённый пункт:",
-            reply_markup=reply_markup
-        )
     else:
-        # Если нет подписки - показываем тарифы
-        keyboard = [
-            [InlineKeyboardButton(f"💳 {TARIFFS['1_day']['name']} - {TARIFFS['1_day']['price']}₽", 
-                                 callback_data='buy_1_day')],
-            [InlineKeyboardButton(f"💳 {TARIFFS['7_days']['name']} - {TARIFFS['7_days']['price']}₽", 
-                                 callback_data='buy_7_days')]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        await query.edit_message_text(
-            f"{WELCOME_TEXT}\n{SUBSCRIPTION_REQUIRED}",
-            reply_markup=reply_markup
-        )
+        await query.edit_message_text(WELCOME_TEXT)
+    
+    # Инициализируем фильтры для всех
+    user_filters[user_id] = {}
+    
+    # Показываем выбор населённого пункта
+    keyboard = [
+        [InlineKeyboardButton("🏖️ Ейск", callback_data='location_ейск')],
+        [InlineKeyboardButton("🌊 Должанская", callback_data='location_должанская')]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    await context.bot.send_message(
+        chat_id=user_id,
+        text="🔍 Давай найдем идеальное жилье!\n\n"
+             "1️⃣ Выбери населённый пункт:",
+        reply_markup=reply_markup
+    )
 
 
 async def new_search_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
