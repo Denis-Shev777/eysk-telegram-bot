@@ -82,6 +82,13 @@ async def buy_subscription(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     
     tariff_key = query.data.replace('buy_', '')
+    
+    # Проверяем корректность тарифа
+    if tariff_key not in TARIFFS:
+        await query.edit_message_text("❌ Некорректный тариф")
+        logger.error(f"Некорректный tariff_key: {tariff_key}")
+        return
+    
     tariff = TARIFFS[tariff_key]
     
     # Проверяем время по МСК
@@ -143,13 +150,24 @@ async def payment_confirmation(update: Update, context: ContextTypes.DEFAULT_TYP
     query = update.callback_query
     await query.answer()
     
-    # Парсим callback_data: paid_REQUEST_ID_TARIFF_KEY
-    # Например: paid_14_1_day -> ['14', '1', 'day']
-    parts = query.data.replace('paid_', '').split('_')
-    request_id = int(parts[0])
-    tariff_key = '_'.join(parts[1:])  # Соединяем все части после request_id: '1_day'
+    # Безопасный парсинг callback_data: paid_REQUEST_ID_TARIFF_KEY
+    try:
+        parts = query.data.replace('paid_', '').split('_')
+        request_id = int(parts[0])
+        tariff_key = '_'.join(parts[1:])  # Соединяем все части после request_id: '1_day'
+        
+        # Проверяем корректность тарифа
+        if tariff_key not in TARIFFS:
+            await query.answer("❌ Некорректный тариф", show_alert=True)
+            logger.error(f"Некорректный tariff_key в payment_confirmation: {tariff_key}")
+            return
+        
+        tariff = TARIFFS[tariff_key]
+    except (IndexError, ValueError) as e:
+        logger.error(f"Ошибка парсинга callback_data в payment_confirmation: {query.data}, {e}")
+        await query.answer("❌ Некорректные данные", show_alert=True)
+        return
     
-    tariff = TARIFFS[tariff_key]
     user_id = query.from_user.id
     
     # Уведомляем админа с кнопкой активации
@@ -693,10 +711,15 @@ async def admin_activate_handler(update: Update, context: ContextTypes.DEFAULT_T
     
     await query.answer()
     
-    # Парсим данные: admin_activate_USER_ID_DAYS
-    parts = query.data.replace('admin_activate_', '').split('_')
-    user_id = int(parts[0])
-    days = int(parts[1])
+    # Безопасный парсинг данных: admin_activate_USER_ID_DAYS
+    try:
+        parts = query.data.replace('admin_activate_', '').split('_')
+        user_id = int(parts[0])
+        days = int(parts[1])
+    except (IndexError, ValueError) as e:
+        logger.error(f"Ошибка парсинга admin callback_data: {query.data}, {e}")
+        await query.answer("❌ Некорректные данные", show_alert=True)
+        return
     
     try:
         # Активируем подписку
