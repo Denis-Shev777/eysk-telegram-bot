@@ -5,15 +5,42 @@ from dotenv import load_dotenv
 # Загружаем переменные из .env файла
 load_dotenv()
 
+def _get_env(
+    name: str,
+    required: bool = True,
+    allow_whitespace: bool = True,
+) -> str | None:
+    value = os.getenv(name)
+    if value is None:
+        if required:
+            raise ValueError(f"Переменная окружения {name} не задана")
+        return None
+    value = value.strip()
+    if required and not value:
+        raise ValueError(f"Переменная окружения {name} пуста")
+    if not allow_whitespace and any(char.isspace() for char in value):
+        raise ValueError(
+            f"Переменная окружения {name} содержит пробелы или переносы строк"
+        )
+    if any(ord(char) < 32 or ord(char) == 127 for char in value):
+        raise ValueError(
+            f"Переменная окружения {name} содержит непечатные символы"
+        )
+    return value
+
 # Telegram Bot Token (получен от @BotFather)
-BOT_TOKEN = os.getenv("BOT_TOKEN")
+BOT_TOKEN = _get_env("BOT_TOKEN", allow_whitespace=False)
 
 # ID администратора (твой Telegram ID)
-ADMIN_ID = int(os.getenv("ADMIN_ID"))
+_admin_id_raw = _get_env("ADMIN_ID", allow_whitespace=False)
+try:
+    ADMIN_ID = int(_admin_id_raw)
+except ValueError as exc:
+    raise ValueError("Переменная окружения ADMIN_ID должна быть числом") from exc
 
 # Реквизиты для оплаты
-PAYMENT_CARD = os.getenv("PAYMENT_CARD")
-PAYMENT_RECIPIENT = os.getenv("PAYMENT_RECIPIENT")
+PAYMENT_CARD = _get_env("PAYMENT_CARD", required=False)
+PAYMENT_RECIPIENT = _get_env("PAYMENT_RECIPIENT", required=False)
 
 # Тарифы (в рублях)
 TARIFFS = {
