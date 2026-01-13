@@ -60,6 +60,42 @@ class Database:
                 )
             ''')
             
+            # Создаем индексы для ускорения запросов
+            cursor.execute('''
+                CREATE INDEX IF NOT EXISTS idx_subscriptions_user_id 
+                ON subscriptions(user_id)
+            ''')
+            
+            cursor.execute('''
+                CREATE INDEX IF NOT EXISTS idx_subscriptions_status 
+                ON subscriptions(status)
+            ''')
+            
+            cursor.execute('''
+                CREATE INDEX IF NOT EXISTS idx_subscriptions_end_date 
+                ON subscriptions(end_date)
+            ''')
+            
+            cursor.execute('''
+                CREATE INDEX IF NOT EXISTS idx_payment_requests_user_id 
+                ON payment_requests(user_id)
+            ''')
+            
+            cursor.execute('''
+                CREATE INDEX IF NOT EXISTS idx_payment_requests_status 
+                ON payment_requests(status)
+            ''')
+            
+            cursor.execute('''
+                CREATE INDEX IF NOT EXISTS idx_search_logs_user_id 
+                ON search_logs(user_id)
+            ''')
+            
+            cursor.execute('''
+                CREATE INDEX IF NOT EXISTS idx_search_logs_created_at 
+                ON search_logs(created_at)
+            ''')
+            
             conn.commit()
     
     def add_user(self, user_id, username, first_name):
