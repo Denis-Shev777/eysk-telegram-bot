@@ -1,19 +1,19 @@
 # Конфигурация бота
-# Заполни свои данные перед запуском
+import os
+from dotenv import load_dotenv
+
+# Загружаем переменные из .env файла
+load_dotenv()
 
 # Telegram Bot Token (получен от @BotFather)
-BOT_TOKEN = "8525280779:AAGwYfyiW72mxA66j42kAvpa2eLJ9K1RhQA"
+BOT_TOKEN = os.getenv("BOT_TOKEN")
 
 # ID администратора (твой Telegram ID)
-ADMIN_ID = 7343069714
-
-# Файл с объявлениями (должен быть в той же папке что и bot.py)
-# Название файла: apartments.xlsx
-# Формат: Excel файл с заголовками в первой строке
+ADMIN_ID = int(os.getenv("ADMIN_ID"))
 
 # Реквизиты для оплаты
-PAYMENT_CARD = "2200 7020 6602 6043"
-PAYMENT_RECIPIENT = "Денис Ш."
+PAYMENT_CARD = os.getenv("PAYMENT_CARD")
+PAYMENT_RECIPIENT = os.getenv("PAYMENT_RECIPIENT")
 
 # Тарифы (в рублях)
 TARIFFS = {
