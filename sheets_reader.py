@@ -123,26 +123,6 @@ class GoogleSheetsReader:
                 except:
                     continue
             
-            # Фильтр по питомцам
-            if filters.get('pets'):
-                if apt.get('Питомцы', '').lower().strip() != 'да':
-                    continue
-            
-            # Фильтр по WiFi
-            if filters.get('wifi'):
-                if apt.get('WiFi', '').lower().strip() != 'да':
-                    continue
-            
-            # Фильтр по кухне
-            if filters.get('kitchen'):
-                if apt.get('Кухня', '').lower().strip() != 'да':
-                    continue
-            
-            # Фильтр по кондиционеру
-            if filters.get('ac'):
-                if apt.get('Кондиционер', '').lower().strip() != 'да':
-                    continue
-            
             result.append(apt)
         
         print(f"✅ Найдено после фильтрации: {len(result)}")
