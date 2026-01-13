@@ -117,8 +117,8 @@ async def buy_subscription(update: Update, context: ContextTypes.DEFAULT_TYPE):
                  f"User ID: {query.from_user.id}\n"
                  f"Тариф: {tariff['name']} - {tariff['price']}₽"
         )
-    except:
-        pass
+    except Exception as e:
+        logger.error(f"Ошибка при уведомлении админа: {e}")
     
     # Показываем реквизиты
     keyboard = [[InlineKeyboardButton("✅ Я оплатил", callback_data=f'paid_{request_id}_{tariff_key}')]]
@@ -173,8 +173,8 @@ async def payment_confirmation(update: Update, context: ContextTypes.DEFAULT_TYP
                  f"Проверь платеж и нажми кнопку ниже:",
             reply_markup=reply_markup
         )
-    except:
-        pass
+    except Exception as e:
+        logger.error(f"Ошибка при уведомлении админа о подтверждении: {e}")
     
     await query.edit_message_text(
         "✅ Спасибо! Твоя заявка принята.\n\n"
@@ -313,7 +313,7 @@ async def show_results_function(context, user_id, filtered, start_index=0):
                     caption=text
                 )
             except Exception as e:
-                print(f"Ошибка при отправке фото: {e}")
+                logger.error(f"Ошибка при отправке фото: {e}")
                 await context.bot.send_message(
                     chat_id=user_id,
                     text=text
@@ -763,7 +763,7 @@ async def admin_activate_handler(update: Update, context: ContextTypes.DEFAULT_T
                     reply_markup=reply_markup
                 )
         except Exception as e:
-            print(f"Ошибка при уведомлении пользователя: {e}")
+            logger.error(f"Ошибка при уведомлении пользователя об активации: {e}")
             
     except Exception as e:
         await query.edit_message_text(
@@ -821,8 +821,8 @@ async def activate_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 text="1️⃣ Выбери населённый пункт:",
                 reply_markup=reply_markup
             )
-        except:
-            pass
+        except Exception as e:
+            logger.error(f"Ошибка при уведомлении пользователя об активации: {e}")
             
     except (IndexError, ValueError):
         await update.message.reply_text(
@@ -925,7 +925,7 @@ async def show_more_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await show_results_function(context, user_id, filtered, start_index=next_index)
     
     # Очищаем данные пагинации если все показано
-    remaining = len(filtered) - next_index - 20
+    remaining = len(filtered) - next_index - RESULTS_PER_PAGE
     if remaining <= 0:
         if user_id in user_pagination_data:
             del user_pagination_data[user_id]
@@ -995,6 +995,10 @@ async def new_search_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
         "1️⃣ Выбери населённый пункт:",
         reply_markup=reply_markup
     )
+
+
+# Константа для использования в show_more_handler
+RESULTS_PER_PAGE = 20
 
 
 def main():
