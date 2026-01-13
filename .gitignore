@@ -1,4 +1,5 @@
 # secrets
+.env
 tg token.txt
 .env
 
