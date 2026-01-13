@@ -1,9 +1,11 @@
 import sqlite3
 from datetime import datetime, timedelta
+import pytz
 
 class Database:
     def __init__(self, db_file='users.db'):
         self.db_file = db_file
+        self.msk_tz = pytz.timezone('Europe/Moscow')
         self.init_db()
     
     def init_db(self):
@@ -82,8 +84,20 @@ class Database:
             result = cursor.fetchone()
         
         if result:
-            end_date = datetime.fromisoformat(result[0])
-            if datetime.now() < end_date:
+            # Преобразуем строку в datetime с timezone
+            end_date_str = result[0]
+            # Если в БД уже есть данные с timezone
+            if '+' in end_date_str or end_date_str.endswith('Z'):
+                end_date = datetime.fromisoformat(end_date_str.replace('Z', '+00:00'))
+            else:
+                # Старые данные без timezone - считаем их МСК
+                end_date = datetime.fromisoformat(end_date_str)
+                end_date = self.msk_tz.localize(end_date)
+            
+            # Текущее время в МСК
+            now_msk = datetime.now(self.msk_tz)
+            
+            if now_msk < end_date:
                 return True, end_date
             else:
                 self.deactivate_subscription(user_id)
@@ -95,13 +109,14 @@ class Database:
         with sqlite3.connect(self.db_file) as conn:
             cursor = conn.cursor()
             
-            start_date = datetime.now()
+            # Используем московское время
+            start_date = datetime.now(self.msk_tz)
             end_date = start_date + timedelta(days=days)
             
             cursor.execute('''
                 INSERT INTO subscriptions (user_id, start_date, end_date, tariff, status)
                 VALUES (?, ?, ?, ?, 'active')
-            ''', (user_id, start_date, end_date, tariff))
+            ''', (user_id, start_date.isoformat(), end_date.isoformat(), tariff))
             
             conn.commit()
             return end_date
