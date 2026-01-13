@@ -1,28 +1,44 @@
 import os
+import time
+import logging
+
 try:
     import openpyxl
 except ImportError:
     print("ОШИБКА: Не установлена библиотека openpyxl")
     print("Установите: pip install openpyxl")
 
+# Настройка логирования
+logger = logging.getLogger(__name__)
+
 class GoogleSheetsReader:
-    """Читает данные из локального Excel файла"""
+    """Читает данные из локального Excel файла с кешированием"""
     
-    def __init__(self, sheet_url=None):
+    def __init__(self, sheet_url=None, cache_duration=300):
         # sheet_url теперь не используется, но оставляем для совместимости
         # Файл должен быть в той же папке что и бот
         self.excel_file = "apartments.xlsx"
+        self.cache_duration = cache_duration  # Время кеширования в секундах (по умолчанию 5 минут)
+        self._cache = None
+        self._cache_time = 0
     
     def read_apartments(self):
-        """Читает данные из Excel файла"""
+        """Читает данные из Excel файла с кешированием"""
+        # Проверяем кеш
+        current_time = time.time()
+        if self._cache is not None and (current_time - self._cache_time) < self.cache_duration:
+            logger.info(f"📦 Использую кешированные данные (возраст: {int(current_time - self._cache_time)}с)")
+            return self._cache
+        
+        # Кеш устарел или пуст - читаем файл заново
         try:
             # Проверяем существование файла
             if not os.path.exists(self.excel_file):
-                print(f"❌ Файл {self.excel_file} не найден!")
-                print(f"Создайте файл {self.excel_file} в папке с ботом")
+                logger.error(f"❌ Файл {self.excel_file} не найден!")
+                logger.error(f"Создайте файл {self.excel_file} в папке с ботом")
                 return []
             
-            print(f"📂 Читаю файл: {self.excel_file}")
+            logger.info(f"📂 Читаю файл: {self.excel_file}")
             
             # Открываем Excel файл
             workbook = openpyxl.load_workbook(self.excel_file, data_only=True)
@@ -35,10 +51,10 @@ class GoogleSheetsReader:
                     headers.append(str(cell.value).strip())
             
             if not headers:
-                print("❌ Не найдены заголовки в первой строке")
+                logger.error("❌ Не найдены заголовки в первой строке")
                 return []
             
-            print(f"📋 Заголовки: {headers}")
+            logger.info(f"📋 Заголовки: {headers}")
             
             # Читаем данные
             apartments = []
@@ -59,21 +75,33 @@ class GoogleSheetsReader:
                 
                 apartments.append(apartment)
             
-            print(f"✅ Загружено объявлений: {len(apartments)}")
+            logger.info(f"✅ Загружено объявлений: {len(apartments)}")
             workbook.close()
+            
+            # Сохраняем в кеш
+            self._cache = apartments
+            self._cache_time = current_time
+            logger.info(f"💾 Данные закешированы на {self.cache_duration}с")
+            
             return apartments
             
         except Exception as e:
-            print(f"❌ Ошибка при чтении файла {self.excel_file}: {e}")
+            logger.error(f"❌ Ошибка при чтении файла {self.excel_file}: {e}")
             import traceback
-            traceback.print_exc()
+            logger.error(traceback.format_exc())
             return []
+    
+    def clear_cache(self):
+        """Очищает кеш принудительно"""
+        self._cache = None
+        self._cache_time = 0
+        logger.info("🗑️ Кеш очищен")
     
     def filter_apartments(self, apartments, filters):
         """Фильтрует объявления по параметрам"""
         result = []
         
-        print(f"🔍 Применяю фильтры: {filters}")
+        logger.info(f"🔍 Применяю фильтры: {filters}")
         
         for apt in apartments:
             # Фильтр по населённому пункту
@@ -104,7 +132,7 @@ class GoogleSheetsReader:
                     if filters.get('max_distance') is not None:
                         if distance > filters['max_distance']:
                             continue
-                except:
+                except (ValueError, TypeError):
                     continue
             
             # Фильтр по количеству гостей
@@ -120,30 +148,10 @@ class GoogleSheetsReader:
                         # Обычный режим - номер должен вмещать нужное количество
                         if max_guests < filters['guests']:
                             continue
-                except:
-                    continue
-            
-            # Фильтр по питомцам
-            if filters.get('pets'):
-                if apt.get('Питомцы', '').lower().strip() != 'да':
-                    continue
-            
-            # Фильтр по WiFi
-            if filters.get('wifi'):
-                if apt.get('WiFi', '').lower().strip() != 'да':
-                    continue
-            
-            # Фильтр по кухне
-            if filters.get('kitchen'):
-                if apt.get('Кухня', '').lower().strip() != 'да':
-                    continue
-            
-            # Фильтр по кондиционеру
-            if filters.get('ac'):
-                if apt.get('Кондиционер', '').lower().strip() != 'да':
+                except (ValueError, TypeError):
                     continue
             
             result.append(apt)
         
-        print(f"✅ Найдено после фильтрации: {len(result)}")
+        logger.info(f"✅ Найдено после фильтрации: {len(result)}")
         return result

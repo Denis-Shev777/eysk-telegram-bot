@@ -82,6 +82,13 @@ async def buy_subscription(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     
     tariff_key = query.data.replace('buy_', '')
+    
+    # Проверяем корректность тарифа
+    if tariff_key not in TARIFFS:
+        await query.edit_message_text("❌ Некорректный тариф")
+        logger.error(f"Некорректный tariff_key: {tariff_key}")
+        return
+    
     tariff = TARIFFS[tariff_key]
     
     # Проверяем время по МСК
@@ -117,8 +124,8 @@ async def buy_subscription(update: Update, context: ContextTypes.DEFAULT_TYPE):
                  f"User ID: {query.from_user.id}\n"
                  f"Тариф: {tariff['name']} - {tariff['price']}₽"
         )
-    except:
-        pass
+    except Exception as e:
+        logger.error(f"Ошибка при уведомлении админа: {e}")
     
     # Показываем реквизиты
     keyboard = [[InlineKeyboardButton("✅ Я оплатил", callback_data=f'paid_{request_id}_{tariff_key}')]]
@@ -143,13 +150,24 @@ async def payment_confirmation(update: Update, context: ContextTypes.DEFAULT_TYP
     query = update.callback_query
     await query.answer()
     
-    # Парсим callback_data: paid_REQUEST_ID_TARIFF_KEY
-    # Например: paid_14_1_day -> ['14', '1', 'day']
-    parts = query.data.replace('paid_', '').split('_')
-    request_id = int(parts[0])
-    tariff_key = '_'.join(parts[1:])  # Соединяем все части после request_id: '1_day'
+    # Безопасный парсинг callback_data: paid_REQUEST_ID_TARIFF_KEY
+    try:
+        parts = query.data.replace('paid_', '').split('_')
+        request_id = int(parts[0])
+        tariff_key = '_'.join(parts[1:])  # Соединяем все части после request_id: '1_day'
+        
+        # Проверяем корректность тарифа
+        if tariff_key not in TARIFFS:
+            await query.answer("❌ Некорректный тариф", show_alert=True)
+            logger.error(f"Некорректный tariff_key в payment_confirmation: {tariff_key}")
+            return
+        
+        tariff = TARIFFS[tariff_key]
+    except (IndexError, ValueError) as e:
+        logger.error(f"Ошибка парсинга callback_data в payment_confirmation: {query.data}, {e}")
+        await query.answer("❌ Некорректные данные", show_alert=True)
+        return
     
-    tariff = TARIFFS[tariff_key]
     user_id = query.from_user.id
     
     # Уведомляем админа с кнопкой активации
@@ -173,8 +191,8 @@ async def payment_confirmation(update: Update, context: ContextTypes.DEFAULT_TYP
                  f"Проверь платеж и нажми кнопку ниже:",
             reply_markup=reply_markup
         )
-    except:
-        pass
+    except Exception as e:
+        logger.error(f"Ошибка при уведомлении админа о подтверждении: {e}")
     
     await query.edit_message_text(
         "✅ Спасибо! Твоя заявка принята.\n\n"
@@ -313,7 +331,7 @@ async def show_results_function(context, user_id, filtered, start_index=0):
                     caption=text
                 )
             except Exception as e:
-                print(f"Ошибка при отправке фото: {e}")
+                logger.error(f"Ошибка при отправке фото: {e}")
                 await context.bot.send_message(
                     chat_id=user_id,
                     text=text
@@ -667,153 +685,6 @@ async def select_distance(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # НЕ очищаем фильтры - они могут пригодиться
 
 
-async def select_pets(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Выбор наличия питомцев"""
-    query = update.callback_query
-    await query.answer()
-    
-    user_id = query.from_user.id
-    
-    if query.data == 'pets_yes':
-        user_filters[user_id]['pets'] = True
-    
-    # Вопрос о WiFi
-    keyboard = [
-        [InlineKeyboardButton("📶 Да, нужен WiFi", callback_data='wifi_yes')],
-        [InlineKeyboardButton("➡️ Не важно", callback_data='wifi_no')]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    
-    await query.edit_message_text(
-        "5️⃣ Нужен ли WiFi?",
-        reply_markup=reply_markup
-    )
-    
-    
-
-
-async def select_wifi(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Выбор WiFi"""
-    query = update.callback_query
-    await query.answer()
-    
-    user_id = query.from_user.id
-    
-    if query.data == 'wifi_yes':
-        user_filters[user_id]['wifi'] = True
-    
-    # Вопрос о кухне
-    keyboard = [
-        [InlineKeyboardButton("🍳 Да, нужна кухня", callback_data='kitchen_yes')],
-        [InlineKeyboardButton("➡️ Не важно", callback_data='kitchen_no')]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    
-    await query.edit_message_text(
-        "6️⃣ Нужна ли кухня?",
-        reply_markup=reply_markup
-    )
-    
-    
-
-
-async def select_kitchen(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Выбор кухни"""
-    query = update.callback_query
-    await query.answer()
-    
-    user_id = query.from_user.id
-    
-    if query.data == 'kitchen_yes':
-        user_filters[user_id]['kitchen'] = True
-    
-    # Вопрос о кондиционере
-    keyboard = [
-        [InlineKeyboardButton("❄️ Да, нужен кондиционер", callback_data='ac_yes')],
-        [InlineKeyboardButton("➡️ Не важно", callback_data='ac_no')]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    
-    await query.edit_message_text(
-        "7️⃣ Нужен ли кондиционер?",
-        reply_markup=reply_markup
-    )
-    
-    
-
-
-async def show_results(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Показ результатов поиска"""
-    query = update.callback_query
-    await query.answer()
-    
-    user_id = query.from_user.id
-    
-    if query.data == 'ac_yes':
-        user_filters[user_id]['ac'] = True
-    
-    await query.edit_message_text("🔍 Ищу подходящие варианты...")
-    
-    # Получаем объявления из таблицы
-    all_apartments = sheets.read_apartments()
-    
-    # Фильтруем
-    filtered = sheets.filter_apartments(all_apartments, user_filters[user_id])
-    
-    # Логируем поиск
-    db.log_search(user_id, user_filters[user_id], len(filtered))
-    
-    if not filtered:
-        await context.bot.send_message(
-            chat_id=user_id,
-            text="😔 К сожалению, по твоим критериям ничего не найдено.\n\n"
-                 "Попробуй изменить параметры поиска:",
-            reply_markup=InlineKeyboardMarkup([[
-                InlineKeyboardButton("🔍 Новый поиск", callback_data='new_search')
-            ]])
-        )
-        # Очищаем фильтры
-        if user_id in user_filters:
-            del user_filters[user_id]
-        return
-    
-    # Проверяем подписку
-    has_subscription, end_date = db.check_subscription(user_id)
-    
-    if has_subscription:
-        # Если есть подписка - показываем результаты
-        await show_results_function(context, user_id, filtered)
-        
-        # Очищаем фильтры
-        if user_id in user_filters:
-            del user_filters[user_id]
-    else:
-        # Если нет подписки - показываем количество и предлагаем оплатить
-        # Сохраняем результаты для показа после оплаты
-        user_search_results[user_id] = filtered
-        
-        keyboard = [
-            [InlineKeyboardButton(f"💳 {TARIFFS['1_day']['name']} - {TARIFFS['1_day']['price']}₽", 
-                                 callback_data='buy_1_day')],
-            [InlineKeyboardButton(f"💳 {TARIFFS['7_days']['name']} - {TARIFFS['7_days']['price']}₽", 
-                                 callback_data='buy_7_days')],
-            [InlineKeyboardButton("🔍 Новый поиск", callback_data='new_search')]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        await context.bot.send_message(
-            chat_id=user_id,
-            text=f"✅ Найдено вариантов: {len(filtered)}\n\n"
-                 f"Для просмотра контактов и фотографий жилья нужна подписка.\n\n"
-                 f"Выбери тариф:",
-            reply_markup=reply_markup
-        )
-        
-        # НЕ очищаем фильтры - они могут пригодиться
-    
-    
-
-
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Отмена поиска"""
     user_id = update.effective_user.id
@@ -840,10 +711,15 @@ async def admin_activate_handler(update: Update, context: ContextTypes.DEFAULT_T
     
     await query.answer()
     
-    # Парсим данные: admin_activate_USER_ID_DAYS
-    parts = query.data.replace('admin_activate_', '').split('_')
-    user_id = int(parts[0])
-    days = int(parts[1])
+    # Безопасный парсинг данных: admin_activate_USER_ID_DAYS
+    try:
+        parts = query.data.replace('admin_activate_', '').split('_')
+        user_id = int(parts[0])
+        days = int(parts[1])
+    except (IndexError, ValueError) as e:
+        logger.error(f"Ошибка парсинга admin callback_data: {query.data}, {e}")
+        await query.answer("❌ Некорректные данные", show_alert=True)
+        return
     
     try:
         # Активируем подписку
@@ -910,7 +786,7 @@ async def admin_activate_handler(update: Update, context: ContextTypes.DEFAULT_T
                     reply_markup=reply_markup
                 )
         except Exception as e:
-            print(f"Ошибка при уведомлении пользователя: {e}")
+            logger.error(f"Ошибка при уведомлении пользователя об активации: {e}")
             
     except Exception as e:
         await query.edit_message_text(
@@ -968,8 +844,8 @@ async def activate_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 text="1️⃣ Выбери населённый пункт:",
                 reply_markup=reply_markup
             )
-        except:
-            pass
+        except Exception as e:
+            logger.error(f"Ошибка при уведомлении пользователя об активации: {e}")
             
     except (IndexError, ValueError):
         await update.message.reply_text(
@@ -1072,7 +948,7 @@ async def show_more_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await show_results_function(context, user_id, filtered, start_index=next_index)
     
     # Очищаем данные пагинации если все показано
-    remaining = len(filtered) - next_index - 20
+    remaining = len(filtered) - next_index - RESULTS_PER_PAGE
     if remaining <= 0:
         if user_id in user_pagination_data:
             del user_pagination_data[user_id]
@@ -1142,6 +1018,10 @@ async def new_search_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
         "1️⃣ Выбери населённый пункт:",
         reply_markup=reply_markup
     )
+
+
+# Константа для использования в show_more_handler
+RESULTS_PER_PAGE = 20
 
 
 def main():
