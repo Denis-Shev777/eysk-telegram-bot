@@ -104,7 +104,7 @@ class GoogleSheetsReader:
                     if filters.get('max_distance') is not None:
                         if distance > filters['max_distance']:
                             continue
-                except:
+                except (ValueError, TypeError):
                     continue
             
             # Фильтр по количеству гостей
@@ -120,7 +120,7 @@ class GoogleSheetsReader:
                         # Обычный режим - номер должен вмещать нужное количество
                         if max_guests < filters['guests']:
                             continue
-                except:
+                except (ValueError, TypeError):
                     continue
             
             result.append(apt)
