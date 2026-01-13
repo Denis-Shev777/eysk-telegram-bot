@@ -1,4 +1,5 @@
 import os
+import time
 try:
     import openpyxl
 except ImportError:
@@ -6,15 +7,25 @@ except ImportError:
     print("Установите: pip install openpyxl")
 
 class GoogleSheetsReader:
-    """Читает данные из локального Excel файла"""
+    """Читает данные из локального Excel файла с кешированием"""
     
-    def __init__(self, sheet_url=None):
+    def __init__(self, sheet_url=None, cache_duration=300):
         # sheet_url теперь не используется, но оставляем для совместимости
         # Файл должен быть в той же папке что и бот
         self.excel_file = "apartments.xlsx"
+        self.cache_duration = cache_duration  # Время кеширования в секундах (по умолчанию 5 минут)
+        self._cache = None
+        self._cache_time = 0
     
     def read_apartments(self):
-        """Читает данные из Excel файла"""
+        """Читает данные из Excel файла с кешированием"""
+        # Проверяем кеш
+        current_time = time.time()
+        if self._cache is not None and (current_time - self._cache_time) < self.cache_duration:
+            print(f"📦 Использую кешированные данные (возраст: {int(current_time - self._cache_time)}с)")
+            return self._cache
+        
+        # Кеш устарел или пуст - читаем файл заново
         try:
             # Проверяем существование файла
             if not os.path.exists(self.excel_file):
@@ -61,6 +72,12 @@ class GoogleSheetsReader:
             
             print(f"✅ Загружено объявлений: {len(apartments)}")
             workbook.close()
+            
+            # Сохраняем в кеш
+            self._cache = apartments
+            self._cache_time = current_time
+            print(f"💾 Данные закешированы на {self.cache_duration}с")
+            
             return apartments
             
         except Exception as e:
@@ -68,6 +85,12 @@ class GoogleSheetsReader:
             import traceback
             traceback.print_exc()
             return []
+    
+    def clear_cache(self):
+        """Очищает кеш принудительно"""
+        self._cache = None
+        self._cache_time = 0
+        print("🗑️ Кеш очищен")
     
     def filter_apartments(self, apartments, filters):
         """Фильтрует объявления по параметрам"""
