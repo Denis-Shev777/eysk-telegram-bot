@@ -49,15 +49,15 @@ USDT_WALLET = _get_env("USDT_WALLET", required=False)
 TARIFFS = {
     "1_day": {
         "price": 99,
-        "price_stars": 100,  # Цена в Telegram Stars
-        "price_usdt": 1,     # Цена в USDT
+        "price_stars": 80,   # Цена в Telegram Stars
+        "price_usdt": 1.5,   # Цена в USDT
         "days": 1,
         "name": "1 день"
     },
     "7_days": {
         "price": 299,
-        "price_stars": 300,  # Цена в Telegram Stars
-        "price_usdt": 3,     # Цена в USDT
+        "price_stars": 250,  # Цена в Telegram Stars
+        "price_usdt": 5,     # Цена в USDT
         "days": 7,
         "name": "7 дней"
     }
