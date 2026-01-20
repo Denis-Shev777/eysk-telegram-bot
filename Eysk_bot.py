@@ -1,3 +1,9 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Eysk Telegram Bot - Version 2.0 with Stars and USDT payments
+"""
+
 import logging
 from datetime import datetime
 import pytz
