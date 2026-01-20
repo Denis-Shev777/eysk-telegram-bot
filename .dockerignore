@@ -1,0 +1,6 @@
+# Force Railway to rebuild - do not cache Python files
+*.pyc
+__pycache__/
+.git/
+.env
+users.db
