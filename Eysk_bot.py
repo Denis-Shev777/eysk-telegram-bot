@@ -95,7 +95,7 @@ async def buy_subscription(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [InlineKeyboardButton("💳 Банковская карта", callback_data=f'pay_card_{tariff_key}')],
         [InlineKeyboardButton(f"⭐ Telegram Stars ({tariff['price_stars']} Stars)", callback_data=f'pay_stars_{tariff_key}')],
-        [InlineKeyboardButton(f"💵 USDT (TRC20) - {tariff['price_usdt']} USDT", callback_data=f'pay_usdt_{tariff_key}')],
+        [InlineKeyboardButton(f"💵 USDT (BEP-20) - {tariff['price_usdt']} USDT", callback_data=f'pay_usdt_{tariff_key}')],
         [InlineKeyboardButton("🔙 Назад", callback_data='go_start')]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -253,7 +253,7 @@ async def pay_with_usdt(update: Update, context: ContextTypes.DEFAULT_TYPE):
             chat_id=ADMIN_ID,
             text=f"💰 Новая заявка на оплату!\n\n"
                  f"ID заявки: {request_id}\n"
-                 f"Способ оплаты: 💵 USDT (TRC20)\n"
+                 f"Способ оплаты: 💵 USDT (BEP-20)\n"
                  f"Пользователь: @{query.from_user.username or 'без username'} "
                  f"({query.from_user.first_name})\n"
                  f"User ID: {query.from_user.id}\n"
@@ -269,9 +269,9 @@ async def pay_with_usdt(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.edit_message_text(
         f"💵 Оплата подписки: {tariff['name']}\n"
         f"Сумма: {tariff['price_usdt']} USDT\n\n"
-        f"💰 Адрес кошелька USDT (TRC20):\n"
+        f"💰 Адрес кошелька USDT (BEP-20):\n"
         f"`{USDT_WALLET}`\n\n"
-        f"⚠️ Внимание! Отправляйте ТОЛЬКО USDT по сети TRC20!\n\n"
+        f"⚠️ Внимание! Отправляйте ТОЛЬКО USDT по сети BEP-20 (Binance Smart Chain)!\n\n"
         f"После оплаты нажми кнопку ниже.\n"
         f"Доступ будет активирован в течение 15 минут.",
         reply_markup=reply_markup,
