@@ -42,7 +42,7 @@ except ValueError as exc:
 PAYMENT_CARD = _get_env("PAYMENT_CARD", required=False)
 PAYMENT_RECIPIENT = _get_env("PAYMENT_RECIPIENT", required=False)
 
-# USDT кошелек (TRC20)
+# USDT кошелек (BEP-20 / Binance Smart Chain)
 USDT_WALLET = _get_env("USDT_WALLET", required=False)
 
 # Тарифы (в рублях, stars и USDT)
