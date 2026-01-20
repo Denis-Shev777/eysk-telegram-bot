@@ -1,10 +1,10 @@
 import logging
 from datetime import datetime
 import pytz
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, LabeledPrice
 from telegram.ext import (
-    Application, CommandHandler, CallbackQueryHandler, 
-    MessageHandler, filters, ContextTypes
+    Application, CommandHandler, CallbackQueryHandler,
+    MessageHandler, filters, ContextTypes, PreCheckoutQueryHandler
 )
 
 from config import *
@@ -77,29 +77,63 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def buy_subscription(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработчик покупки подписки"""
+    """Обработчик покупки подписки - показываем выбор способа оплаты"""
     query = update.callback_query
     await query.answer()
-    
+
     tariff_key = query.data.replace('buy_', '')
-    
+
     # Проверяем корректность тарифа
     if tariff_key not in TARIFFS:
         await query.edit_message_text("❌ Некорректный тариф")
         logger.error(f"Некорректный tariff_key: {tariff_key}")
         return
-    
+
     tariff = TARIFFS[tariff_key]
-    
+
+    # Показываем выбор способа оплаты
+    keyboard = [
+        [InlineKeyboardButton("💳 Банковская карта", callback_data=f'pay_card_{tariff_key}')],
+        [InlineKeyboardButton(f"⭐ Telegram Stars ({tariff['price_stars']} Stars)", callback_data=f'pay_stars_{tariff_key}')],
+        [InlineKeyboardButton(f"💵 USDT (TRC20) - {tariff['price_usdt']} USDT", callback_data=f'pay_usdt_{tariff_key}')],
+        [InlineKeyboardButton("🔙 Назад", callback_data='go_start')]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    await query.edit_message_text(
+        f"💰 Оплата подписки: {tariff['name']}\n\n"
+        f"Выбери способ оплаты:\n\n"
+        f"💳 Карта: {tariff['price']}₽\n"
+        f"⭐ Stars: {tariff['price_stars']} Stars\n"
+        f"💵 USDT: {tariff['price_usdt']} USDT",
+        reply_markup=reply_markup
+    )
+
+
+async def pay_with_card(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Оплата банковской картой"""
+    query = update.callback_query
+    await query.answer()
+
+    tariff_key = query.data.replace('pay_card_', '')
+
+    # Проверяем корректность тарифа
+    if tariff_key not in TARIFFS:
+        await query.edit_message_text("❌ Некорректный тариф")
+        logger.error(f"Некорректный tariff_key: {tariff_key}")
+        return
+
+    tariff = TARIFFS[tariff_key]
+
     # Проверяем время по МСК
     if not is_payment_time():
         msk_tz = pytz.timezone('Europe/Moscow')
         now_msk = datetime.now(msk_tz)
         current_time = now_msk.strftime('%H:%M')
-        
+
         keyboard = [[InlineKeyboardButton("🏠 В начало", callback_data='go_start')]]
         reply_markup = InlineKeyboardMarkup(keyboard)
-        
+
         await query.edit_message_text(
             f"⏰ Оплата временно недоступна\n\n"
             f"Текущее время МСК: {current_time}\n\n"
@@ -109,16 +143,17 @@ async def buy_subscription(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=reply_markup
         )
         return
-    
+
     # Добавляем заявку на оплату
-    request_id = db.add_payment_request(query.from_user.id, tariff_key)
-    
+    request_id = db.add_payment_request(query.from_user.id, tariff_key, 'card')
+
     # Уведомляем админа
     try:
         await context.bot.send_message(
             chat_id=ADMIN_ID,
             text=f"💰 Новая заявка на оплату!\n\n"
                  f"ID заявки: {request_id}\n"
+                 f"Способ оплаты: 💳 Карта\n"
                  f"Пользователь: @{query.from_user.username or 'без username'} "
                  f"({query.from_user.first_name})\n"
                  f"User ID: {query.from_user.id}\n"
@@ -126,11 +161,11 @@ async def buy_subscription(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
     except Exception as e:
         logger.error(f"Ошибка при уведомлении админа: {e}")
-    
+
     # Показываем реквизиты
-    keyboard = [[InlineKeyboardButton("✅ Я оплатил", callback_data=f'paid_{request_id}_{tariff_key}')]]
+    keyboard = [[InlineKeyboardButton("✅ Я оплатил", callback_data=f'paid_card_{request_id}_{tariff_key}')]]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    
+
     await query.edit_message_text(
         f"💳 Оплата подписки: {tariff['name']}\n"
         f"Сумма: {tariff['price']}₽\n\n"
@@ -145,23 +180,127 @@ async def buy_subscription(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
+async def pay_with_stars(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Оплата через Telegram Stars"""
+    query = update.callback_query
+    await query.answer()
+
+    tariff_key = query.data.replace('pay_stars_', '')
+
+    # Проверяем корректность тарифа
+    if tariff_key not in TARIFFS:
+        await query.edit_message_text("❌ Некорректный тариф")
+        logger.error(f"Некорректный tariff_key: {tariff_key}")
+        return
+
+    tariff = TARIFFS[tariff_key]
+
+    # Создаем инвойс для оплаты Stars
+    title = f"Подписка {tariff['name']}"
+    description = f"Доступ к базе жилья в Ейске и Должанской на {tariff['days']} " + ("день" if tariff['days'] == 1 else "дней")
+    payload = f"subscription_{tariff_key}_{query.from_user.id}"
+
+    # Отправляем инвойс
+    try:
+        await context.bot.send_invoice(
+            chat_id=query.from_user.id,
+            title=title,
+            description=description,
+            payload=payload,
+            provider_token="",  # Для Stars используется пустая строка
+            currency="XTR",  # XTR - код валюты для Telegram Stars
+            prices=[LabeledPrice(label=title, amount=tariff['price_stars'])]
+        )
+
+        await query.edit_message_text(
+            f"⭐ Оплата через Telegram Stars\n\n"
+            f"Счет на оплату отправлен!\n"
+            f"Сумма: {tariff['price_stars']} Stars\n\n"
+            f"После успешной оплаты подписка активируется автоматически."
+        )
+    except Exception as e:
+        logger.error(f"Ошибка при создании инвойса Stars: {e}")
+        await query.edit_message_text(
+            f"❌ Ошибка при создании счета.\n\n"
+            f"Пожалуйста, попробуйте другой способ оплаты или обратитесь к администратору.",
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton("🏠 В начало", callback_data='go_start')
+            ]])
+        )
+
+
+async def pay_with_usdt(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Оплата через USDT"""
+    query = update.callback_query
+    await query.answer()
+
+    tariff_key = query.data.replace('pay_usdt_', '')
+
+    # Проверяем корректность тарифа
+    if tariff_key not in TARIFFS:
+        await query.edit_message_text("❌ Некорректный тариф")
+        logger.error(f"Некорректный tariff_key: {tariff_key}")
+        return
+
+    tariff = TARIFFS[tariff_key]
+
+    # Добавляем заявку на оплату
+    request_id = db.add_payment_request(query.from_user.id, tariff_key, 'usdt')
+
+    # Уведомляем админа
+    try:
+        await context.bot.send_message(
+            chat_id=ADMIN_ID,
+            text=f"💰 Новая заявка на оплату!\n\n"
+                 f"ID заявки: {request_id}\n"
+                 f"Способ оплаты: 💵 USDT (TRC20)\n"
+                 f"Пользователь: @{query.from_user.username or 'без username'} "
+                 f"({query.from_user.first_name})\n"
+                 f"User ID: {query.from_user.id}\n"
+                 f"Тариф: {tariff['name']} - {tariff['price_usdt']} USDT"
+        )
+    except Exception as e:
+        logger.error(f"Ошибка при уведомлении админа: {e}")
+
+    # Показываем реквизиты USDT
+    keyboard = [[InlineKeyboardButton("✅ Я оплатил", callback_data=f'paid_usdt_{request_id}_{tariff_key}')]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    await query.edit_message_text(
+        f"💵 Оплата подписки: {tariff['name']}\n"
+        f"Сумма: {tariff['price_usdt']} USDT\n\n"
+        f"💰 Адрес кошелька USDT (TRC20):\n"
+        f"`{USDT_WALLET}`\n\n"
+        f"⚠️ Внимание! Отправляйте ТОЛЬКО USDT по сети TRC20!\n\n"
+        f"После оплаты нажми кнопку ниже.\n"
+        f"Доступ будет активирован в течение 15 минут.",
+        reply_markup=reply_markup,
+        parse_mode='Markdown'
+    )
+
+
 async def payment_confirmation(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Подтверждение оплаты от пользователя"""
     query = update.callback_query
     await query.answer()
-    
-    # Безопасный парсинг callback_data: paid_REQUEST_ID_TARIFF_KEY
+
+    # Безопасный парсинг callback_data: paid_METHOD_REQUEST_ID_TARIFF_KEY
     try:
-        parts = query.data.replace('paid_', '').split('_')
-        request_id = int(parts[0])
-        tariff_key = '_'.join(parts[1:])  # Соединяем все части после request_id: '1_day'
-        
+        # Убираем префикс 'paid_'
+        data = query.data.replace('paid_', '')
+        parts = data.split('_')
+
+        # Определяем метод оплаты
+        payment_method = parts[0]  # card или usdt
+        request_id = int(parts[1])
+        tariff_key = '_'.join(parts[2:])  # Соединяем все части после request_id: '1_day'
+
         # Проверяем корректность тарифа
         if tariff_key not in TARIFFS:
             await query.answer("❌ Некорректный тариф", show_alert=True)
             logger.error(f"Некорректный tariff_key в payment_confirmation: {tariff_key}")
             return
-        
+
         tariff = TARIFFS[tariff_key]
     except (IndexError, ValueError) as e:
         logger.error(f"Ошибка парсинга callback_data в payment_confirmation: {query.data}, {e}")
@@ -169,25 +308,33 @@ async def payment_confirmation(update: Update, context: ContextTypes.DEFAULT_TYP
         return
     
     user_id = query.from_user.id
-    
+
+    # Определяем сообщение в зависимости от метода оплаты
+    payment_info = ""
+    if payment_method == 'card':
+        payment_info = f"💳 Карта - {tariff['price']}₽"
+    elif payment_method == 'usdt':
+        payment_info = f"💵 USDT - {tariff['price_usdt']} USDT"
+
     # Уведомляем админа с кнопкой активации
     try:
         keyboard = [[
             InlineKeyboardButton(
-                f"✅ Активировать ({tariff['name']})", 
+                f"✅ Активировать ({tariff['name']})",
                 callback_data=f'admin_activate_{user_id}_{tariff["days"]}'
             )
         ]]
         reply_markup = InlineKeyboardMarkup(keyboard)
-        
+
         await context.bot.send_message(
             chat_id=ADMIN_ID,
             text=f"✅ Пользователь подтвердил оплату!\n\n"
                  f"ID заявки: {request_id}\n"
+                 f"Способ оплаты: {payment_info}\n"
                  f"Пользователь: @{query.from_user.username or 'без username'} "
                  f"({query.from_user.first_name})\n"
                  f"User ID: {user_id}\n"
-                 f"Тариф: {tariff['name']} - {tariff['price']}₽\n\n"
+                 f"Тариф: {tariff['name']}\n\n"
                  f"Проверь платеж и нажми кнопку ниже:",
             reply_markup=reply_markup
         )
@@ -212,15 +359,107 @@ async def payment_confirmation(update: Update, context: ContextTypes.DEFAULT_TYP
     )
 
 
+async def precheckout_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Подтверждение платежа Stars перед оплатой"""
+    query = update.pre_checkout_query
+    # Всегда подтверждаем платеж
+    await query.answer(ok=True)
+
+
+async def successful_payment_stars(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработка успешной оплаты через Stars"""
+    payment = update.message.successful_payment
+    user_id = update.effective_user.id
+
+    # Парсим payload: subscription_TARIFF_KEY_USER_ID
+    try:
+        payload_parts = payment.invoice_payload.split('_')
+        tariff_key = '_'.join(payload_parts[1:-1])  # Получаем tariff_key (например, "1_day")
+
+        if tariff_key not in TARIFFS:
+            logger.error(f"Некорректный tariff_key из payload: {tariff_key}")
+            await update.message.reply_text("❌ Ошибка обработки платежа. Обратитесь к администратору.")
+            return
+
+        tariff = TARIFFS[tariff_key]
+
+        # Активируем подписку автоматически
+        end_date = db.add_subscription(user_id, tariff['days'], tariff_key)
+
+        # Уведомляем админа об успешной оплате Stars
+        try:
+            await context.bot.send_message(
+                chat_id=ADMIN_ID,
+                text=f"⭐ Успешная оплата через Stars!\n\n"
+                     f"Пользователь: @{update.effective_user.username or 'без username'} "
+                     f"({update.effective_user.first_name})\n"
+                     f"User ID: {user_id}\n"
+                     f"Тариф: {tariff['name']}\n"
+                     f"Сумма: {tariff['price_stars']} Stars\n"
+                     f"Подписка активирована до: {end_date.strftime('%d.%m.%Y %H:%M')}"
+            )
+        except Exception as e:
+            logger.error(f"Ошибка при уведомлении админа об оплате Stars: {e}")
+
+        # Уведомляем пользователя
+        await update.message.reply_text(
+            f"🎉 Оплата успешна!\n\n"
+            f"✅ Подписка активирована!\n"
+            f"Тариф: {tariff['name']}\n"
+            f"Активна до: {end_date.strftime('%d.%m.%Y %H:%M')}"
+        )
+
+        # Проверяем есть ли сохраненные результаты поиска
+        if user_id in user_search_results:
+            # Есть сохраненные результаты - показываем их
+            filtered = user_search_results[user_id]
+
+            await context.bot.send_message(
+                chat_id=user_id,
+                text=f"🔍 Вот результаты твоего поиска ({len(filtered)} вариантов):"
+            )
+
+            await show_results_function(context, user_id, filtered)
+
+            # Очищаем сохраненные результаты
+            del user_search_results[user_id]
+
+            # Очищаем фильтры
+            if user_id in user_filters:
+                del user_filters[user_id]
+        else:
+            # Нет сохраненных результатов - начинаем новый поиск
+            user_filters[user_id] = {}
+
+            keyboard = [
+                [InlineKeyboardButton("🏖️ Ейск", callback_data='location_ейск')],
+                [InlineKeyboardButton("🌊 Должанская", callback_data='location_должанская')]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+
+            await context.bot.send_message(
+                chat_id=user_id,
+                text="🔍 Давай найдем жилье для тебя!\n\n1️⃣ Выбери населённый пункт:",
+                reply_markup=reply_markup
+            )
+
+    except Exception as e:
+        logger.error(f"Ошибка при обработке успешной оплаты Stars: {e}")
+        await update.message.reply_text(
+            "❌ Произошла ошибка при активации подписки.\n"
+            "Пожалуйста, обратитесь к администратору."
+        )
+
+
 async def send_payment_reminder(context: ContextTypes.DEFAULT_TYPE):
     """Отправка напоминания если подписка не активирована через 1 час"""
     job_data = context.job.data
     user_id = job_data['user_id']
     request_id = job_data['request_id']
-    
+
     # Проверяем, активирована ли подписка
     has_subscription, end_date = db.check_subscription(user_id)
-    
+
     if not has_subscription:
         # Подписка не активирована - отправляем напоминание
         try:
@@ -1028,14 +1267,21 @@ def main():
     """Запуск бота"""
     # Создаем приложение
     application = Application.builder().token(BOT_TOKEN).build()
-    
+
     # Регистрируем обработчики
     application.add_handler(CommandHandler('start', start))
     application.add_handler(CommandHandler('search', search_start))
     application.add_handler(CommandHandler('cancel', cancel))
-    
+
+    # Обработчики оплаты Stars
+    application.add_handler(PreCheckoutQueryHandler(precheckout_callback))
+    application.add_handler(MessageHandler(filters.SUCCESSFUL_PAYMENT, successful_payment_stars))
+
     # Обработчики кнопок (callback queries)
     application.add_handler(CallbackQueryHandler(buy_subscription, pattern='^buy_'))
+    application.add_handler(CallbackQueryHandler(pay_with_card, pattern='^pay_card_'))
+    application.add_handler(CallbackQueryHandler(pay_with_stars, pattern='^pay_stars_'))
+    application.add_handler(CallbackQueryHandler(pay_with_usdt, pattern='^pay_usdt_'))
     application.add_handler(CallbackQueryHandler(payment_confirmation, pattern='^paid_'))
     application.add_handler(CallbackQueryHandler(admin_activate_handler, pattern='^admin_activate_'))
     application.add_handler(CallbackQueryHandler(select_location, pattern='^location_'))
@@ -1046,13 +1292,13 @@ def main():
     application.add_handler(CallbackQueryHandler(go_start_handler, pattern='^go_start$'))
     application.add_handler(CallbackQueryHandler(new_search_handler, pattern='^new_search$'))
     application.add_handler(CallbackQueryHandler(show_more_handler, pattern='^show_more$'))
-    
+
     # Админские команды
     application.add_handler(CommandHandler('activate', activate_user))
     application.add_handler(CommandHandler('check', check_user))
     application.add_handler(CommandHandler('stats', show_stats))
     application.add_handler(CommandHandler('pending', show_pending))
-    
+
     # Запускаем бота
     logger.info("Бот запущен!")
     application.run_polling(allowed_updates=Update.ALL_TYPES)

@@ -42,6 +42,7 @@ class Database:
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     user_id INTEGER,
                     tariff TEXT,
+                    payment_method TEXT DEFAULT 'card',
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     status TEXT DEFAULT 'pending',
                     FOREIGN KEY (user_id) REFERENCES users(user_id)
@@ -168,14 +169,14 @@ class Database:
             ''', (user_id,))
             conn.commit()
     
-    def add_payment_request(self, user_id, tariff):
+    def add_payment_request(self, user_id, tariff, payment_method='card'):
         """Добавляет заявку на оплату"""
         with sqlite3.connect(self.db_file) as conn:
             cursor = conn.cursor()
             cursor.execute('''
-                INSERT INTO payment_requests (user_id, tariff, status)
-                VALUES (?, ?, 'pending')
-            ''', (user_id, tariff))
+                INSERT INTO payment_requests (user_id, tariff, payment_method, status)
+                VALUES (?, ?, ?, 'pending')
+            ''', (user_id, tariff, payment_method))
             request_id = cursor.lastrowid
             conn.commit()
             return request_id
