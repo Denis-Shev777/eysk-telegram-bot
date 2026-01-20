@@ -42,10 +42,25 @@ except ValueError as exc:
 PAYMENT_CARD = _get_env("PAYMENT_CARD", required=False)
 PAYMENT_RECIPIENT = _get_env("PAYMENT_RECIPIENT", required=False)
 
-# Тарифы (в рублях)
+# USDT кошелек (TRC20)
+USDT_WALLET = _get_env("USDT_WALLET", required=False)
+
+# Тарифы (в рублях, stars и USDT)
 TARIFFS = {
-    "1_day": {"price": 99, "days": 1, "name": "1 день"},
-    "7_days": {"price": 299, "days": 7, "name": "7 дней"}
+    "1_day": {
+        "price": 99,
+        "price_stars": 100,  # Цена в Telegram Stars
+        "price_usdt": 1,     # Цена в USDT
+        "days": 1,
+        "name": "1 день"
+    },
+    "7_days": {
+        "price": 299,
+        "price_stars": 300,  # Цена в Telegram Stars
+        "price_usdt": 3,     # Цена в USDT
+        "days": 7,
+        "name": "7 дней"
+    }
 }
 
 # Текст приветствия
