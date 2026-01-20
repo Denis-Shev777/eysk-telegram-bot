@@ -3,3 +3,5 @@ requests==2.31.0
 openpyxl==3.1.2
 pytz
 python-dotenv
+
+# Force rebuild for Stars/USDT payment integration
