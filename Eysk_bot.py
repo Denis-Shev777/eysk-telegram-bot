@@ -163,7 +163,10 @@ async def pay_with_card(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.error(f"Ошибка при уведомлении админа: {e}")
 
     # Показываем реквизиты
-    keyboard = [[InlineKeyboardButton("✅ Я оплатил", callback_data=f'paid_card_{request_id}_{tariff_key}')]]
+    keyboard = [
+        [InlineKeyboardButton("✅ Я оплатил", callback_data=f'paid_card_{request_id}_{tariff_key}')],
+        [InlineKeyboardButton("🔙 Назад", callback_data=f'buy_{tariff_key}')]
+    ]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     await query.edit_message_text(
@@ -263,7 +266,10 @@ async def pay_with_usdt(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.error(f"Ошибка при уведомлении админа: {e}")
 
     # Показываем реквизиты USDT
-    keyboard = [[InlineKeyboardButton("✅ Я оплатил", callback_data=f'paid_usdt_{request_id}_{tariff_key}')]]
+    keyboard = [
+        [InlineKeyboardButton("✅ Я оплатил", callback_data=f'paid_usdt_{request_id}_{tariff_key}')],
+        [InlineKeyboardButton("🔙 Назад", callback_data=f'buy_{tariff_key}')]
+    ]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     await query.edit_message_text(
