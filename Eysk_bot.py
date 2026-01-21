@@ -674,9 +674,9 @@ async def select_location(update: Update, context: ContextTypes.DEFAULT_TYPE):
             user_search_results[user_id] = filtered
             
             keyboard = [
-                [InlineKeyboardButton(f"💳 {TARIFFS['1_day']['name']} - {TARIFFS['1_day']['price']}₽", 
+                [InlineKeyboardButton(f"📅 {TARIFFS['1_day']['name']}",
                                      callback_data='buy_1_day')],
-                [InlineKeyboardButton(f"💳 {TARIFFS['7_days']['name']} - {TARIFFS['7_days']['price']}₽", 
+                [InlineKeyboardButton(f"📅 {TARIFFS['7_days']['name']}",
                                      callback_data='buy_7_days')],
                 [InlineKeyboardButton("🔍 Новый поиск", callback_data='new_search')]
             ]
@@ -911,9 +911,9 @@ async def select_distance(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_search_results[user_id] = filtered
         
         keyboard = [
-            [InlineKeyboardButton(f"💳 {TARIFFS['1_day']['name']} - {TARIFFS['1_day']['price']}₽", 
+            [InlineKeyboardButton(f"📅 {TARIFFS['1_day']['name']}",
                                  callback_data='buy_1_day')],
-            [InlineKeyboardButton(f"💳 {TARIFFS['7_days']['name']} - {TARIFFS['7_days']['price']}₽", 
+            [InlineKeyboardButton(f"📅 {TARIFFS['7_days']['name']}",
                                  callback_data='buy_7_days')],
             [InlineKeyboardButton("🔍 Новый поиск", callback_data='new_search')]
         ]
