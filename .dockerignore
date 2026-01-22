@@ -1,0 +1,47 @@
+# Git
+.git
+.gitignore
+
+# Python cache
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+
+# Virtual environments
+venv/
+env/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Database (будет создана внутри контейнера)
+*.db
+*.sqlite
+*.sqlite3
+
+# Env files (будут переданы через переменные окружения)
+.env
+.env.local
+
+# Документация
+*.md
+!README.md
+
+# Railway специфичные файлы
+railway.json
+Procfile
+.railway
+
+# Логи
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
