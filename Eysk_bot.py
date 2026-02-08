@@ -7,7 +7,7 @@ Eysk Telegram Bot - Version 2.0 with Stars and USDT payments
 import logging
 from datetime import datetime
 import pytz
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, LabeledPrice
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, LabeledPrice, CopyTextButton
 from telegram.ext import (
     Application, CommandHandler, CallbackQueryHandler,
     MessageHandler, filters, ContextTypes, PreCheckoutQueryHandler
@@ -99,7 +99,7 @@ async def buy_subscription(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Показываем выбор способа оплаты
     keyboard = [
-        [InlineKeyboardButton("💳 Банковская карта", callback_data=f'pay_card_{tariff_key}')],
+        [InlineKeyboardButton(f"📱 Пополнить баланс мобильного - {tariff['price']}₽", callback_data=f'pay_card_{tariff_key}')],
         [InlineKeyboardButton(f"⭐ Telegram Stars ({tariff['price_stars']} Stars)", callback_data=f'pay_stars_{tariff_key}')],
         [InlineKeyboardButton(f"💵 USDT (BEP-20) - {tariff['price_usdt']} USDT", callback_data=f'pay_usdt_{tariff_key}')],
         [InlineKeyboardButton("🔙 Назад", callback_data='go_start')]
@@ -109,7 +109,7 @@ async def buy_subscription(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.edit_message_text(
         f"💰 Оплата подписки: {tariff['name']}\n\n"
         f"Выбери способ оплаты:\n\n"
-        f"💳 Карта: {tariff['price']}₽\n"
+        f"📱 Мобильный: {tariff['price']}₽\n"
         f"⭐ Stars: {tariff['price_stars']} Stars\n"
         f"💵 USDT: {tariff['price_usdt']} USDT",
         reply_markup=reply_markup
@@ -117,7 +117,7 @@ async def buy_subscription(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def pay_with_card(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Оплата банковской картой"""
+    """Оплата пополнением баланса мобильного"""
     query = update.callback_query
     await query.answer()
 
@@ -151,7 +151,7 @@ async def pay_with_card(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     # Добавляем заявку на оплату
-    request_id = db.add_payment_request(query.from_user.id, tariff_key, 'card')
+    request_id = db.add_payment_request(query.from_user.id, tariff_key, 'mobile')
 
     # Уведомляем админа
     try:
@@ -159,7 +159,7 @@ async def pay_with_card(update: Update, context: ContextTypes.DEFAULT_TYPE):
             chat_id=ADMIN_ID,
             text=f"💰 Новая заявка на оплату!\n\n"
                  f"ID заявки: {request_id}\n"
-                 f"Способ оплаты: 💳 Карта\n"
+                 f"Способ оплаты: 📱 Пополнение мобильного\n"
                  f"Пользователь: @{query.from_user.username or 'без username'} "
                  f"({query.from_user.first_name})\n"
                  f"User ID: {query.from_user.id}\n"
@@ -173,11 +173,11 @@ async def pay_with_card(update: Update, context: ContextTypes.DEFAULT_TYPE):
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     await query.edit_message_text(
-        f"💳 Оплата подписки: {tariff['name']}\n"
+        f"📱 Оплата подписки: {tariff['name']}\n"
         f"Сумма: {tariff['price']}₽\n\n"
-        f"💰 Реквизиты для оплаты:\n"
-        f"Карта Т-Банк: `{PAYMENT_CARD}`\n"
-        f"Получатель: {PAYMENT_RECIPIENT}\n\n"
+        f"💰 Пополните баланс мобильного:\n"
+        f"Номер: `{PAYMENT_PHONE}`\n"
+        f"Оператор: Теле2\n\n"
         f"После оплаты нажми кнопку ниже.\n"
         f"Доступ будет активирован в течение 15 минут.\n\n"
         f"⏰ Подписка активируется только с 11:00 до 23:00 по МСК",
@@ -269,7 +269,11 @@ async def pay_with_usdt(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.error(f"Ошибка при уведомлении админа: {e}")
 
     # Показываем реквизиты USDT
-    keyboard = [[InlineKeyboardButton("✅ Я оплатил", callback_data=f'paid_usdt_{request_id}_{tariff_key}')]]
+    keyboard = [
+        [InlineKeyboardButton("📋 Копировать адрес", copy_text=CopyTextButton(text=USDT_WALLET))],
+        [InlineKeyboardButton("✅ Я оплатил", callback_data=f'paid_usdt_{request_id}_{tariff_key}')],
+        [InlineKeyboardButton("🔙 Назад", callback_data='go_start')]
+    ]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     await query.edit_message_text(
@@ -318,7 +322,7 @@ async def payment_confirmation(update: Update, context: ContextTypes.DEFAULT_TYP
     # Определяем сообщение в зависимости от метода оплаты
     payment_info = ""
     if payment_method == 'card':
-        payment_info = f"💳 Карта - {tariff['price']}₽"
+        payment_info = f"📱 Мобильный - {tariff['price']}₽"
     elif payment_method == 'usdt':
         payment_info = f"💵 USDT - {tariff['price_usdt']} USDT"
 
@@ -674,14 +678,16 @@ async def select_location(update: Update, context: ContextTypes.DEFAULT_TYPE):
             user_search_results[user_id] = filtered
             
             keyboard = [
-                [InlineKeyboardButton(f"📅 {TARIFFS['1_day']['name']}",
+                [InlineKeyboardButton(f"💳 {TARIFFS['1_day']['name']} - {TARIFFS['1_day']['price']}₽",
                                      callback_data='buy_1_day')],
-                [InlineKeyboardButton(f"📅 {TARIFFS['7_days']['name']}",
+                [InlineKeyboardButton(f"💳 {TARIFFS['7_days']['name']} - {TARIFFS['7_days']['price']}₽",
                                      callback_data='buy_7_days')],
+                [InlineKeyboardButton(f"💳 {TARIFFS['30_days']['name']} - {TARIFFS['30_days']['price']}₽",
+                                     callback_data='buy_30_days')],
                 [InlineKeyboardButton("🔍 Новый поиск", callback_data='new_search')]
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
-            
+
             await context.bot.send_message(
                 chat_id=user_id,
                 text=f"✅ Найдено вариантов: {len(filtered)}\n\n"
@@ -689,9 +695,9 @@ async def select_location(update: Update, context: ContextTypes.DEFAULT_TYPE):
                      f"Выбери тариф:",
                 reply_markup=reply_markup
             )
-            
+
             # НЕ очищаем фильтры - они могут пригодиться
-    
+
     # Если выбран Ейск - задаём вопросы
     else:
         keyboard = [
@@ -911,14 +917,16 @@ async def select_distance(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_search_results[user_id] = filtered
         
         keyboard = [
-            [InlineKeyboardButton(f"📅 {TARIFFS['1_day']['name']}",
+            [InlineKeyboardButton(f"💳 {TARIFFS['1_day']['name']} - {TARIFFS['1_day']['price']}₽",
                                  callback_data='buy_1_day')],
-            [InlineKeyboardButton(f"📅 {TARIFFS['7_days']['name']}",
+            [InlineKeyboardButton(f"💳 {TARIFFS['7_days']['name']} - {TARIFFS['7_days']['price']}₽",
                                  callback_data='buy_7_days')],
+            [InlineKeyboardButton(f"💳 {TARIFFS['30_days']['name']} - {TARIFFS['30_days']['price']}₽",
+                                 callback_data='buy_30_days')],
             [InlineKeyboardButton("🔍 Новый поиск", callback_data='new_search')]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
-        
+
         await context.bot.send_message(
             chat_id=user_id,
             text=f"✅ Найдено вариантов: {len(filtered)}\n\n"
@@ -926,7 +934,7 @@ async def select_distance(update: Update, context: ContextTypes.DEFAULT_TYPE):
                  f"Выбери тариф:",
             reply_markup=reply_markup
         )
-        
+
         # НЕ очищаем фильтры - они могут пригодиться
 
 
