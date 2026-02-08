@@ -169,7 +169,10 @@ async def pay_with_card(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.error(f"Ошибка при уведомлении админа: {e}")
 
     # Показываем реквизиты
-    keyboard = [[InlineKeyboardButton("✅ Я оплатил", callback_data=f'paid_card_{request_id}_{tariff_key}')]]
+    keyboard = [
+        [InlineKeyboardButton("✅ Я оплатил", callback_data=f'paid_card_{request_id}_{tariff_key}')],
+        [InlineKeyboardButton("🔙 Назад", callback_data='go_start')]
+    ]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     await query.edit_message_text(
@@ -222,7 +225,10 @@ async def pay_with_stars(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"⭐ Оплата через Telegram Stars\n\n"
             f"Счет на оплату отправлен!\n"
             f"Сумма: {tariff['price_stars']} Stars\n\n"
-            f"После успешной оплаты подписка активируется автоматически."
+            f"После успешной оплаты подписка активируется автоматически.",
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton("🏠 В начало", callback_data='go_start')
+            ]])
         )
     except Exception as e:
         logger.error(f"Ошибка при создании инвойса Stars: {e}")
@@ -706,7 +712,8 @@ async def select_location(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [InlineKeyboardButton("🏘 3-комнатная", callback_data='type_3-комн')],
             [InlineKeyboardButton("🏘️ Частный дом", callback_data='type_частный дом')],
             [InlineKeyboardButton("🏨 Гостевой дом", callback_data='type_гостевой дом')],
-            [InlineKeyboardButton("➡️ Любой тип", callback_data='type_any')]
+            [InlineKeyboardButton("➡️ Любой тип", callback_data='type_any')],
+            [InlineKeyboardButton("🔙 Назад", callback_data='go_start')]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         
@@ -739,7 +746,8 @@ async def select_type(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("👥 3-4 гостя", callback_data='guests_4')],
         [InlineKeyboardButton("👨‍👩‍👧‍👦 5-6 гостей", callback_data='guests_6')],
         [InlineKeyboardButton("🏢 7+ гостей", callback_data='guests_7')],
-        [InlineKeyboardButton("➡️ Не важно", callback_data='guests_any')]
+        [InlineKeyboardButton("➡️ Не важно", callback_data='guests_any')],
+        [InlineKeyboardButton("🔙 Назад", callback_data='go_start')]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
@@ -772,7 +780,8 @@ async def select_guests(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Задаём дополнительный вопрос про 2 номера
         keyboard = [
             [InlineKeyboardButton("✅ Да, подойдет 2 номера", callback_data='two_rooms_yes')],
-            [InlineKeyboardButton("❌ Нет, нужен один номер", callback_data='two_rooms_no')]
+            [InlineKeyboardButton("❌ Нет, нужен один номер", callback_data='two_rooms_no')],
+            [InlineKeyboardButton("🔙 Назад", callback_data='go_start')]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         
@@ -789,7 +798,8 @@ async def select_guests(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("🚶 150-500м", callback_data='dist_150-500')],
         [InlineKeyboardButton("🚗 500-1000м", callback_data='dist_500-1000')],
         [InlineKeyboardButton("🏙️ Более 1000м", callback_data='dist_1000-99999')],
-        [InlineKeyboardButton("➡️ Не важно", callback_data='dist_any')]
+        [InlineKeyboardButton("➡️ Не важно", callback_data='dist_any')],
+        [InlineKeyboardButton("🔙 Назад", callback_data='go_start')]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
@@ -823,7 +833,8 @@ async def select_two_rooms(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("🚶 150-500м", callback_data='dist_150-500')],
         [InlineKeyboardButton("🚗 500-1000м", callback_data='dist_500-1000')],
         [InlineKeyboardButton("🏙️ Более 1000м", callback_data='dist_1000-99999')],
-        [InlineKeyboardButton("➡️ Не важно", callback_data='dist_any')]
+        [InlineKeyboardButton("➡️ Не важно", callback_data='dist_any')],
+        [InlineKeyboardButton("🔙 Назад", callback_data='go_start')]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
