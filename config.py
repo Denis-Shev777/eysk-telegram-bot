@@ -42,6 +42,9 @@ except ValueError as exc:
 PAYMENT_CARD = _get_env("PAYMENT_CARD", required=False)
 PAYMENT_RECIPIENT = _get_env("PAYMENT_RECIPIENT", required=False)
 
+# Номер телефона для пополнения баланса (Теле2)
+PAYMENT_PHONE = _get_env("PAYMENT_PHONE", required=False) or "+7-991-998-6115"
+
 # USDT кошелек (BEP-20 / Binance Smart Chain)
 USDT_WALLET = _get_env("USDT_WALLET", required=False)
 
@@ -60,6 +63,13 @@ TARIFFS = {
         "price_usdt": 5,     # Цена в USDT
         "days": 7,
         "name": "7 дней"
+    },
+    "30_days": {
+        "price": 499,
+        "price_stars": 400,  # Цена в Telegram Stars
+        "price_usdt": 7.5,   # Цена в USDT
+        "days": 30,
+        "name": "30 дней"
     }
 }
 
