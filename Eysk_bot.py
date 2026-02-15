@@ -10,6 +10,7 @@ import hashlib
 import random
 import pytz
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, LabeledPrice, CopyTextButton
+from telegram.error import BadRequest
 from telegram.ext import (
     Application, CommandHandler, CallbackQueryHandler,
     MessageHandler, filters, ContextTypes, PreCheckoutQueryHandler
@@ -19,361 +20,373 @@ from config import *
 from database import Database
 from sheets_reader import GoogleSheetsReader
 
-# Настройка логирования
+# РќР°СЃС‚СЂРѕР№РєР° Р»РѕРіРёСЂРѕРІР°РЅРёСЏ
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO
 )
 logger = logging.getLogger(__name__)
 
-# Инициализация
+# РРЅРёС†РёР°Р»РёР·Р°С†РёСЏ
 db = Database()
-sheets = GoogleSheetsReader()  # Теперь читает из apartments.xlsx
+sheets = GoogleSheetsReader()  # РўРµРїРµСЂСЊ С‡РёС‚Р°РµС‚ РёР· apartments.xlsx
 
-# Временное хранилище фильтров пользователя
+# Р’СЂРµРјРµРЅРЅРѕРµ С…СЂР°РЅРёР»РёС‰Рµ С„РёР»СЊС‚СЂРѕРІ РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ
 user_filters = {}
 
-# Временное хранилище данных пагинации (для кнопки "Показать еще")
+# Р’СЂРµРјРµРЅРЅРѕРµ С…СЂР°РЅРёР»РёС‰Рµ РґР°РЅРЅС‹С… РїР°РіРёРЅР°С†РёРё (РґР»СЏ РєРЅРѕРїРєРё "РџРѕРєР°Р·Р°С‚СЊ РµС‰Рµ")
 user_pagination_data = {}
 
-# Временное хранилище результатов поиска (для пользователей без подписки)
+# Р’СЂРµРјРµРЅРЅРѕРµ С…СЂР°РЅРёР»РёС‰Рµ СЂРµР·СѓР»СЊС‚Р°С‚РѕРІ РїРѕРёСЃРєР° (РґР»СЏ РїРѕР»СЊР·РѕРІР°С‚РµР»РµР№ Р±РµР· РїРѕРґРїРёСЃРєРё)
 user_search_results = {}
 
-# Константы превью/уведомлений
+# РљРѕРЅСЃС‚Р°РЅС‚С‹ РїСЂРµРІСЊСЋ/СѓРІРµРґРѕРјР»РµРЅРёР№
 PREVIEW_RESULTS_LIMIT = 2
 NOTIFICATION_CHECK_INTERVAL_SECONDS = 900
 NOTIFICATION_NEW_ITEMS_LIMIT = 3
 
 
 def build_apartment_key(apartment: dict) -> str:
-    """Строит стабильный ключ объявления для учета просмотров/уведомлений."""
+    """РЎС‚СЂРѕРёС‚ СЃС‚Р°Р±РёР»СЊРЅС‹Р№ РєР»СЋС‡ РѕР±СЉСЏРІР»РµРЅРёСЏ РґР»СЏ СѓС‡РµС‚Р° РїСЂРѕСЃРјРѕС‚СЂРѕРІ/СѓРІРµРґРѕРјР»РµРЅРёР№."""
     key_parts = [
-        apartment.get('Населенный_пункт', '').strip(),
-        apartment.get('Тип_жилья', '').strip(),
-        apartment.get('Расстояние_от_моря_м', '').strip(),
-        apartment.get('Гостей_макс', '').strip(),
-        apartment.get('Цена_за_сутки', '').strip(),
-        apartment.get('Телефон', '').strip(),
-        apartment.get('Имя_хозяина', '').strip(),
-        apartment.get('VK_ссылка', '').strip(),
-        apartment.get('Фото_URL', '').strip(),
+        apartment.get('РќР°СЃРµР»РµРЅРЅС‹Р№_РїСѓРЅРєС‚', '').strip(),
+        apartment.get('РўРёРї_Р¶РёР»СЊСЏ', '').strip(),
+        apartment.get('Р Р°СЃСЃС‚РѕСЏРЅРёРµ_РѕС‚_РјРѕСЂСЏ_Рј', '').strip(),
+        apartment.get('Р“РѕСЃС‚РµР№_РјР°РєСЃ', '').strip(),
+        apartment.get('Р¦РµРЅР°_Р·Р°_СЃСѓС‚РєРё', '').strip(),
+        apartment.get('РўРµР»РµС„РѕРЅ', '').strip(),
+        apartment.get('РРјСЏ_С…РѕР·СЏРёРЅР°', '').strip(),
+        apartment.get('VK_СЃСЃС‹Р»РєР°', '').strip(),
+        apartment.get('Р¤РѕС‚Рѕ_URL', '').strip(),
     ]
     raw = "|".join(key_parts)
     return hashlib.sha256(raw.encode('utf-8')).hexdigest()
 
 
 def get_fake_views_count(apartment_key: str) -> int:
-    """Псевдо-рандомный, но стабильный счетчик просмотров для объявления."""
+    """РџСЃРµРІРґРѕ-СЂР°РЅРґРѕРјРЅС‹Р№, РЅРѕ СЃС‚Р°Р±РёР»СЊРЅС‹Р№ СЃС‡РµС‚С‡РёРє РїСЂРѕСЃРјРѕС‚СЂРѕРІ РґР»СЏ РѕР±СЉСЏРІР»РµРЅРёСЏ."""
     rng = random.Random(apartment_key)
     return rng.randint(8, 39)
 
 
 async def seed_seen_apartments_for_user(user_id: int):
-    """Заполняет базу текущими объявлениями, чтобы уведомлять только о новых."""
+    """Р—Р°РїРѕР»РЅСЏРµС‚ Р±Р°Р·Сѓ С‚РµРєСѓС‰РёРјРё РѕР±СЉСЏРІР»РµРЅРёСЏРјРё, С‡С‚РѕР±С‹ СѓРІРµРґРѕРјР»СЏС‚СЊ С‚РѕР»СЊРєРѕ Рѕ РЅРѕРІС‹С…."""
     all_apartments = sheets.read_apartments()
     all_keys = [build_apartment_key(apt) for apt in all_apartments]
     db.add_seen_apartments(user_id, all_keys)
 
 
 def is_payment_time():
-    """Проверка, доступна ли оплата в текущее время (11:00-23:00 МСК)"""
+    """РџСЂРѕРІРµСЂРєР°, РґРѕСЃС‚СѓРїРЅР° Р»Рё РѕРїР»Р°С‚Р° РІ С‚РµРєСѓС‰РµРµ РІСЂРµРјСЏ (11:00-23:00 РњРЎРљ)"""
     msk_tz = pytz.timezone('Europe/Moscow')
     now_msk = datetime.now(msk_tz)
     current_hour = now_msk.hour
     
-    # Возвращаем True если время между 11:00 и 23:00 МСК
+    # Р’РѕР·РІСЂР°С‰Р°РµРј True РµСЃР»Рё РІСЂРµРјСЏ РјРµР¶РґСѓ 11:00 Рё 23:00 РњРЎРљ
     return 11 <= current_hour < 23
 
 
+async def safe_answer_callback(query, *args, **kwargs):
+    """Р‘РµР·РѕРїР°СЃРЅРѕ РѕС‚РІРµС‡Р°РµС‚ РЅР° callback; РёРіРЅРѕСЂРёСЂСѓРµС‚ РїСЂРѕСЃСЂРѕС‡РµРЅРЅС‹Рµ callback-Р·Р°РїСЂРѕСЃС‹."""
+    try:
+        await query.answer(*args, **kwargs)
+    except BadRequest as e:
+        msg = str(e).lower()
+        if "query is too old" in msg or "query id is invalid" in msg:
+            logger.warning(f"РџСЂРѕРїСѓС‰РµРЅ СѓСЃС‚Р°СЂРµРІС€РёР№ callback: {e}")
+            return
+        raise
+
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработчик команды /start"""
+    """РћР±СЂР°Р±РѕС‚С‡РёРє РєРѕРјР°РЅРґС‹ /start"""
     user = update.effective_user
     db.add_user(user.id, user.username, user.first_name)
     
-    # Проверяем подписку для информации
+    # РџСЂРѕРІРµСЂСЏРµРј РїРѕРґРїРёСЃРєСѓ РґР»СЏ РёРЅС„РѕСЂРјР°С†РёРё
     has_subscription, end_date = db.check_subscription(user.id)
     
-    # Приветствие
+    # РџСЂРёРІРµС‚СЃС‚РІРёРµ
     if has_subscription:
         await update.message.reply_text(
             f"{WELCOME_TEXT}\n\n"
-            f"✅ Подписка активна до {end_date.strftime('%d.%m.%Y %H:%M')}"
+            f"вњ… РџРѕРґРїРёСЃРєР° Р°РєС‚РёРІРЅР° РґРѕ {end_date.strftime('%d.%m.%Y %H:%M')}"
         )
     else:
         await update.message.reply_text(WELCOME_TEXT)
     
-    # Инициализируем фильтры для всех пользователей
+    # РРЅРёС†РёР°Р»РёР·РёСЂСѓРµРј С„РёР»СЊС‚СЂС‹ РґР»СЏ РІСЃРµС… РїРѕР»СЊР·РѕРІР°С‚РµР»РµР№
     user_filters[user.id] = {}
     
-    # ПЕРВЫЙ ВОПРОС - выбор населённого пункта (для всех)
+    # РџР•Р Р’Р«Р™ Р’РћРџР РћРЎ - РІС‹Р±РѕСЂ РЅР°СЃРµР»С‘РЅРЅРѕРіРѕ РїСѓРЅРєС‚Р° (РґР»СЏ РІСЃРµС…)
     keyboard = [
-        [InlineKeyboardButton("🏖️ Ейск", callback_data='location_ейск')],
-        [InlineKeyboardButton("🌊 Должанская", callback_data='location_должанская')]
+        [InlineKeyboardButton("рџЏ–пёЏ Р•Р№СЃРє", callback_data='location_РµР№СЃРє')],
+        [InlineKeyboardButton("рџЊЉ Р”РѕР»Р¶Р°РЅСЃРєР°СЏ", callback_data='location_РґРѕР»Р¶Р°РЅСЃРєР°СЏ')]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     await update.message.reply_text(
-        "🔍 Давай найдем идеальное жилье!\n\n"
-        "1️⃣ Выбери населённый пункт:",
+        "рџ”Ќ Р”Р°РІР°Р№ РЅР°Р№РґРµРј РёРґРµР°Р»СЊРЅРѕРµ Р¶РёР»СЊРµ!\n\n"
+        "1пёЏвѓЈ Р’С‹Р±РµСЂРё РЅР°СЃРµР»С‘РЅРЅС‹Р№ РїСѓРЅРєС‚:",
         reply_markup=reply_markup
     )
 
 
 async def buy_subscription(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработчик покупки подписки - показываем выбор способа оплаты"""
+    """РћР±СЂР°Р±РѕС‚С‡РёРє РїРѕРєСѓРїРєРё РїРѕРґРїРёСЃРєРё - РїРѕРєР°Р·С‹РІР°РµРј РІС‹Р±РѕСЂ СЃРїРѕСЃРѕР±Р° РѕРїР»Р°С‚С‹"""
     query = update.callback_query
-    await query.answer()
+    await safe_answer_callback(query)
 
     tariff_key = query.data.replace('buy_', '')
 
-    # Проверяем корректность тарифа
+    # РџСЂРѕРІРµСЂСЏРµРј РєРѕСЂСЂРµРєС‚РЅРѕСЃС‚СЊ С‚Р°СЂРёС„Р°
     if tariff_key not in TARIFFS:
-        await query.edit_message_text("❌ Некорректный тариф")
-        logger.error(f"Некорректный tariff_key: {tariff_key}")
+        await query.edit_message_text("вќЊ РќРµРєРѕСЂСЂРµРєС‚РЅС‹Р№ С‚Р°СЂРёС„")
+        logger.error(f"РќРµРєРѕСЂСЂРµРєС‚РЅС‹Р№ tariff_key: {tariff_key}")
         return
 
     tariff = TARIFFS[tariff_key]
 
-    # Показываем выбор способа оплаты
+    # РџРѕРєР°Р·С‹РІР°РµРј РІС‹Р±РѕСЂ СЃРїРѕСЃРѕР±Р° РѕРїР»Р°С‚С‹
     keyboard = [
-        [InlineKeyboardButton(f"📱 Пополнить баланс мобильного - {tariff['price']}₽", callback_data=f'pay_card_{tariff_key}')],
-        [InlineKeyboardButton(f"⭐ Telegram Stars ({tariff['price_stars']} Stars)", callback_data=f'pay_stars_{tariff_key}')],
-        [InlineKeyboardButton(f"💵 USDT (BEP-20) - {tariff['price_usdt']} USDT", callback_data=f'pay_usdt_{tariff_key}')],
-        [InlineKeyboardButton("🔙 Назад", callback_data='go_start')]
+        [InlineKeyboardButton(f"рџ“± РџРѕРїРѕР»РЅРёС‚СЊ Р±Р°Р»Р°РЅСЃ РјРѕР±РёР»СЊРЅРѕРіРѕ - {tariff['price']}в‚Ѕ", callback_data=f'pay_card_{tariff_key}')],
+        [InlineKeyboardButton(f"в­ђ Telegram Stars ({tariff['price_stars']} Stars)", callback_data=f'pay_stars_{tariff_key}')],
+        [InlineKeyboardButton(f"рџ’µ USDT (BEP-20) - {tariff['price_usdt']} USDT", callback_data=f'pay_usdt_{tariff_key}')],
+        [InlineKeyboardButton("рџ”™ РќР°Р·Р°Рґ", callback_data='go_start')]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     await query.edit_message_text(
-        f"💰 Оплата подписки: {tariff['name']}\n\n"
-        f"Выбери способ оплаты:\n\n"
-        f"📱 Мобильный: {tariff['price']}₽\n"
-        f"⭐ Stars: {tariff['price_stars']} Stars\n"
-        f"💵 USDT: {tariff['price_usdt']} USDT",
+        f"рџ’° РћРїР»Р°С‚Р° РїРѕРґРїРёСЃРєРё: {tariff['name']}\n\n"
+        f"Р’С‹Р±РµСЂРё СЃРїРѕСЃРѕР± РѕРїР»Р°С‚С‹:\n\n"
+        f"рџ“± РњРѕР±РёР»СЊРЅС‹Р№: {tariff['price']}в‚Ѕ\n"
+        f"в­ђ Stars: {tariff['price_stars']} Stars\n"
+        f"рџ’µ USDT: {tariff['price_usdt']} USDT",
         reply_markup=reply_markup
     )
 
 
 async def pay_with_card(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Оплата пополнением баланса мобильного"""
+    """РћРїР»Р°С‚Р° РїРѕРїРѕР»РЅРµРЅРёРµРј Р±Р°Р»Р°РЅСЃР° РјРѕР±РёР»СЊРЅРѕРіРѕ"""
     query = update.callback_query
-    await query.answer()
+    await safe_answer_callback(query)
 
     tariff_key = query.data.replace('pay_card_', '')
 
-    # Проверяем корректность тарифа
+    # РџСЂРѕРІРµСЂСЏРµРј РєРѕСЂСЂРµРєС‚РЅРѕСЃС‚СЊ С‚Р°СЂРёС„Р°
     if tariff_key not in TARIFFS:
-        await query.edit_message_text("❌ Некорректный тариф")
-        logger.error(f"Некорректный tariff_key: {tariff_key}")
+        await query.edit_message_text("вќЊ РќРµРєРѕСЂСЂРµРєС‚РЅС‹Р№ С‚Р°СЂРёС„")
+        logger.error(f"РќРµРєРѕСЂСЂРµРєС‚РЅС‹Р№ tariff_key: {tariff_key}")
         return
 
     tariff = TARIFFS[tariff_key]
 
-    # Проверяем время по МСК
+    # РџСЂРѕРІРµСЂСЏРµРј РІСЂРµРјСЏ РїРѕ РњРЎРљ
     if not is_payment_time():
         msk_tz = pytz.timezone('Europe/Moscow')
         now_msk = datetime.now(msk_tz)
         current_time = now_msk.strftime('%H:%M')
 
-        keyboard = [[InlineKeyboardButton("🏠 В начало", callback_data='go_start')]]
+        keyboard = [[InlineKeyboardButton("рџЏ  Р’ РЅР°С‡Р°Р»Рѕ", callback_data='go_start')]]
         reply_markup = InlineKeyboardMarkup(keyboard)
 
         await query.edit_message_text(
-            f"⏰ Оплата временно недоступна\n\n"
-            f"Текущее время МСК: {current_time}\n\n"
-            f"Оплата и активация подписки доступны только:\n"
-            f"📅 С 11:00 до 23:00 по МСК\n\n"
-            f"Попробуй позже!",
+            f"вЏ° РћРїР»Р°С‚Р° РІСЂРµРјРµРЅРЅРѕ РЅРµРґРѕСЃС‚СѓРїРЅР°\n\n"
+            f"РўРµРєСѓС‰РµРµ РІСЂРµРјСЏ РњРЎРљ: {current_time}\n\n"
+            f"РћРїР»Р°С‚Р° Рё Р°РєС‚РёРІР°С†РёСЏ РїРѕРґРїРёСЃРєРё РґРѕСЃС‚СѓРїРЅС‹ С‚РѕР»СЊРєРѕ:\n"
+            f"рџ“… РЎ 11:00 РґРѕ 23:00 РїРѕ РњРЎРљ\n\n"
+            f"РџРѕРїСЂРѕР±СѓР№ РїРѕР·Р¶Рµ!",
             reply_markup=reply_markup
         )
         return
 
-    # Добавляем заявку на оплату
+    # Р”РѕР±Р°РІР»СЏРµРј Р·Р°СЏРІРєСѓ РЅР° РѕРїР»Р°С‚Сѓ
     request_id = db.add_payment_request(query.from_user.id, tariff_key, 'mobile')
 
-    # Уведомляем админа
+    # РЈРІРµРґРѕРјР»СЏРµРј Р°РґРјРёРЅР°
     try:
         await context.bot.send_message(
             chat_id=ADMIN_ID,
-            text=f"💰 Новая заявка на оплату!\n\n"
-                 f"ID заявки: {request_id}\n"
-                 f"Способ оплаты: 📱 Пополнение мобильного\n"
-                 f"Пользователь: @{query.from_user.username or 'без username'} "
+            text=f"рџ’° РќРѕРІР°СЏ Р·Р°СЏРІРєР° РЅР° РѕРїР»Р°С‚Сѓ!\n\n"
+                 f"ID Р·Р°СЏРІРєРё: {request_id}\n"
+                 f"РЎРїРѕСЃРѕР± РѕРїР»Р°С‚С‹: рџ“± РџРѕРїРѕР»РЅРµРЅРёРµ РјРѕР±РёР»СЊРЅРѕРіРѕ\n"
+                 f"РџРѕР»СЊР·РѕРІР°С‚РµР»СЊ: @{query.from_user.username or 'Р±РµР· username'} "
                  f"({query.from_user.first_name})\n"
                  f"User ID: {query.from_user.id}\n"
-                 f"Тариф: {tariff['name']} - {tariff['price']}₽"
+                 f"РўР°СЂРёС„: {tariff['name']} - {tariff['price']}в‚Ѕ"
         )
     except Exception as e:
-        logger.error(f"Ошибка при уведомлении админа: {e}")
+        logger.error(f"РћС€РёР±РєР° РїСЂРё СѓРІРµРґРѕРјР»РµРЅРёРё Р°РґРјРёРЅР°: {e}")
 
-    # Показываем реквизиты
+    # РџРѕРєР°Р·С‹РІР°РµРј СЂРµРєРІРёР·РёС‚С‹
     keyboard = [
-        [InlineKeyboardButton("✅ Я оплатил", callback_data=f'paid_card_{request_id}_{tariff_key}')],
-        [InlineKeyboardButton("🔙 Назад", callback_data='go_start')]
+        [InlineKeyboardButton("вњ… РЇ РѕРїР»Р°С‚РёР»", callback_data=f'paid_card_{request_id}_{tariff_key}')],
+        [InlineKeyboardButton("рџ”™ РќР°Р·Р°Рґ", callback_data='go_start')]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     await query.edit_message_text(
-        f"📱 Оплата подписки: {tariff['name']}\n"
-        f"Сумма: {tariff['price']}₽\n\n"
-        f"💰 Пополните баланс мобильного:\n"
-        f"Номер: `{PAYMENT_PHONE}`\n"
-        f"Оператор: Теле2\n\n"
-        f"После оплаты нажми кнопку ниже.\n"
-        f"Доступ будет активирован в течение 15 минут.\n\n"
-        f"⏰ Подписка активируется только с 11:00 до 23:00 по МСК",
+        f"рџ“± РћРїР»Р°С‚Р° РїРѕРґРїРёСЃРєРё: {tariff['name']}\n"
+        f"РЎСѓРјРјР°: {tariff['price']}в‚Ѕ\n\n"
+        f"рџ’° РџРѕРїРѕР»РЅРёС‚Рµ Р±Р°Р»Р°РЅСЃ РјРѕР±РёР»СЊРЅРѕРіРѕ:\n"
+        f"РќРѕРјРµСЂ: `{PAYMENT_PHONE}`\n"
+        f"РћРїРµСЂР°С‚РѕСЂ: РўРµР»Рµ2\n\n"
+        f"РџРѕСЃР»Рµ РѕРїР»Р°С‚С‹ РЅР°Р¶РјРё РєРЅРѕРїРєСѓ РЅРёР¶Рµ.\n"
+        f"Р”РѕСЃС‚СѓРї Р±СѓРґРµС‚ Р°РєС‚РёРІРёСЂРѕРІР°РЅ РІ С‚РµС‡РµРЅРёРµ 15 РјРёРЅСѓС‚.\n\n"
+        f"вЏ° РџРѕРґРїРёСЃРєР° Р°РєС‚РёРІРёСЂСѓРµС‚СЃСЏ С‚РѕР»СЊРєРѕ СЃ 11:00 РґРѕ 23:00 РїРѕ РњРЎРљ",
         reply_markup=reply_markup,
         parse_mode='Markdown'
     )
 
 
 async def pay_with_stars(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Оплата через Telegram Stars"""
+    """РћРїР»Р°С‚Р° С‡РµСЂРµР· Telegram Stars"""
     query = update.callback_query
-    await query.answer()
+    await safe_answer_callback(query)
 
     tariff_key = query.data.replace('pay_stars_', '')
 
-    # Проверяем корректность тарифа
+    # РџСЂРѕРІРµСЂСЏРµРј РєРѕСЂСЂРµРєС‚РЅРѕСЃС‚СЊ С‚Р°СЂРёС„Р°
     if tariff_key not in TARIFFS:
-        await query.edit_message_text("❌ Некорректный тариф")
-        logger.error(f"Некорректный tariff_key: {tariff_key}")
+        await query.edit_message_text("вќЊ РќРµРєРѕСЂСЂРµРєС‚РЅС‹Р№ С‚Р°СЂРёС„")
+        logger.error(f"РќРµРєРѕСЂСЂРµРєС‚РЅС‹Р№ tariff_key: {tariff_key}")
         return
 
     tariff = TARIFFS[tariff_key]
 
-    # Создаем инвойс для оплаты Stars
-    title = f"Подписка {tariff['name']}"
-    description = f"Доступ к базе жилья в Ейске и Должанской на {tariff['days']} " + ("день" if tariff['days'] == 1 else "дней")
+    # РЎРѕР·РґР°РµРј РёРЅРІРѕР№СЃ РґР»СЏ РѕРїР»Р°С‚С‹ Stars
+    title = f"РџРѕРґРїРёСЃРєР° {tariff['name']}"
+    description = f"Р”РѕСЃС‚СѓРї Рє Р±Р°Р·Рµ Р¶РёР»СЊСЏ РІ Р•Р№СЃРєРµ Рё Р”РѕР»Р¶Р°РЅСЃРєРѕР№ РЅР° {tariff['days']} " + ("РґРµРЅСЊ" if tariff['days'] == 1 else "РґРЅРµР№")
     payload = f"subscription_{tariff_key}_{query.from_user.id}"
 
-    # Отправляем инвойс
+    # РћС‚РїСЂР°РІР»СЏРµРј РёРЅРІРѕР№СЃ
     try:
         await context.bot.send_invoice(
             chat_id=query.from_user.id,
             title=title,
             description=description,
             payload=payload,
-            provider_token="",  # Для Stars используется пустая строка
-            currency="XTR",  # XTR - код валюты для Telegram Stars
+            provider_token="",  # Р”Р»СЏ Stars РёСЃРїРѕР»СЊР·СѓРµС‚СЃСЏ РїСѓСЃС‚Р°СЏ СЃС‚СЂРѕРєР°
+            currency="XTR",  # XTR - РєРѕРґ РІР°Р»СЋС‚С‹ РґР»СЏ Telegram Stars
             prices=[LabeledPrice(label=title, amount=tariff['price_stars'])]
         )
 
         await query.edit_message_text(
-            f"⭐ Оплата через Telegram Stars\n\n"
-            f"Счет на оплату отправлен!\n"
-            f"Сумма: {tariff['price_stars']} Stars\n\n"
-            f"После успешной оплаты подписка активируется автоматически.",
+            f"в­ђ РћРїР»Р°С‚Р° С‡РµСЂРµР· Telegram Stars\n\n"
+            f"РЎС‡РµС‚ РЅР° РѕРїР»Р°С‚Сѓ РѕС‚РїСЂР°РІР»РµРЅ!\n"
+            f"РЎСѓРјРјР°: {tariff['price_stars']} Stars\n\n"
+            f"РџРѕСЃР»Рµ СѓСЃРїРµС€РЅРѕР№ РѕРїР»Р°С‚С‹ РїРѕРґРїРёСЃРєР° Р°РєС‚РёРІРёСЂСѓРµС‚СЃСЏ Р°РІС‚РѕРјР°С‚РёС‡РµСЃРєРё.",
             reply_markup=InlineKeyboardMarkup([[
-                InlineKeyboardButton("🏠 В начало", callback_data='go_start')
+                InlineKeyboardButton("рџЏ  Р’ РЅР°С‡Р°Р»Рѕ", callback_data='go_start')
             ]])
         )
     except Exception as e:
-        logger.error(f"Ошибка при создании инвойса Stars: {e}")
+        logger.error(f"РћС€РёР±РєР° РїСЂРё СЃРѕР·РґР°РЅРёРё РёРЅРІРѕР№СЃР° Stars: {e}")
         await query.edit_message_text(
-            f"❌ Ошибка при создании счета.\n\n"
-            f"Пожалуйста, попробуйте другой способ оплаты или обратитесь к администратору.",
+            f"вќЊ РћС€РёР±РєР° РїСЂРё СЃРѕР·РґР°РЅРёРё СЃС‡РµС‚Р°.\n\n"
+            f"РџРѕР¶Р°Р»СѓР№СЃС‚Р°, РїРѕРїСЂРѕР±СѓР№С‚Рµ РґСЂСѓРіРѕР№ СЃРїРѕСЃРѕР± РѕРїР»Р°С‚С‹ РёР»Рё РѕР±СЂР°С‚РёС‚РµСЃСЊ Рє Р°РґРјРёРЅРёСЃС‚СЂР°С‚РѕСЂСѓ.",
             reply_markup=InlineKeyboardMarkup([[
-                InlineKeyboardButton("🏠 В начало", callback_data='go_start')
+                InlineKeyboardButton("рџЏ  Р’ РЅР°С‡Р°Р»Рѕ", callback_data='go_start')
             ]])
         )
 
 
 async def pay_with_usdt(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Оплата через USDT"""
+    """РћРїР»Р°С‚Р° С‡РµСЂРµР· USDT"""
     query = update.callback_query
-    await query.answer()
+    await safe_answer_callback(query)
 
     tariff_key = query.data.replace('pay_usdt_', '')
 
-    # Проверяем корректность тарифа
+    # РџСЂРѕРІРµСЂСЏРµРј РєРѕСЂСЂРµРєС‚РЅРѕСЃС‚СЊ С‚Р°СЂРёС„Р°
     if tariff_key not in TARIFFS:
-        await query.edit_message_text("❌ Некорректный тариф")
-        logger.error(f"Некорректный tariff_key: {tariff_key}")
+        await query.edit_message_text("вќЊ РќРµРєРѕСЂСЂРµРєС‚РЅС‹Р№ С‚Р°СЂРёС„")
+        logger.error(f"РќРµРєРѕСЂСЂРµРєС‚РЅС‹Р№ tariff_key: {tariff_key}")
         return
 
     tariff = TARIFFS[tariff_key]
 
-    # Добавляем заявку на оплату
+    # Р”РѕР±Р°РІР»СЏРµРј Р·Р°СЏРІРєСѓ РЅР° РѕРїР»Р°С‚Сѓ
     request_id = db.add_payment_request(query.from_user.id, tariff_key, 'usdt')
 
-    # Уведомляем админа
+    # РЈРІРµРґРѕРјР»СЏРµРј Р°РґРјРёРЅР°
     try:
         await context.bot.send_message(
             chat_id=ADMIN_ID,
-            text=f"💰 Новая заявка на оплату!\n\n"
-                 f"ID заявки: {request_id}\n"
-                 f"Способ оплаты: 💵 USDT (BEP-20)\n"
-                 f"Пользователь: @{query.from_user.username or 'без username'} "
+            text=f"рџ’° РќРѕРІР°СЏ Р·Р°СЏРІРєР° РЅР° РѕРїР»Р°С‚Сѓ!\n\n"
+                 f"ID Р·Р°СЏРІРєРё: {request_id}\n"
+                 f"РЎРїРѕСЃРѕР± РѕРїР»Р°С‚С‹: рџ’µ USDT (BEP-20)\n"
+                 f"РџРѕР»СЊР·РѕРІР°С‚РµР»СЊ: @{query.from_user.username or 'Р±РµР· username'} "
                  f"({query.from_user.first_name})\n"
                  f"User ID: {query.from_user.id}\n"
-                 f"Тариф: {tariff['name']} - {tariff['price_usdt']} USDT"
+                 f"РўР°СЂРёС„: {tariff['name']} - {tariff['price_usdt']} USDT"
         )
     except Exception as e:
-        logger.error(f"Ошибка при уведомлении админа: {e}")
+        logger.error(f"РћС€РёР±РєР° РїСЂРё СѓРІРµРґРѕРјР»РµРЅРёРё Р°РґРјРёРЅР°: {e}")
 
-    # Показываем реквизиты USDT
+    # РџРѕРєР°Р·С‹РІР°РµРј СЂРµРєРІРёР·РёС‚С‹ USDT
     keyboard = [
-        [InlineKeyboardButton("📋 Копировать адрес", copy_text=CopyTextButton(text=USDT_WALLET))],
-        [InlineKeyboardButton("✅ Я оплатил", callback_data=f'paid_usdt_{request_id}_{tariff_key}')],
-        [InlineKeyboardButton("🔙 Назад", callback_data='go_start')]
+        [InlineKeyboardButton("рџ“‹ РљРѕРїРёСЂРѕРІР°С‚СЊ Р°РґСЂРµСЃ", copy_text=CopyTextButton(text=USDT_WALLET))],
+        [InlineKeyboardButton("вњ… РЇ РѕРїР»Р°С‚РёР»", callback_data=f'paid_usdt_{request_id}_{tariff_key}')],
+        [InlineKeyboardButton("рџ”™ РќР°Р·Р°Рґ", callback_data='go_start')]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     await query.edit_message_text(
-        f"💵 Оплата подписки: {tariff['name']}\n"
-        f"Сумма: {tariff['price_usdt']} USDT\n\n"
-        f"💰 Адрес кошелька USDT (BEP-20):\n"
+        f"рџ’µ РћРїР»Р°С‚Р° РїРѕРґРїРёСЃРєРё: {tariff['name']}\n"
+        f"РЎСѓРјРјР°: {tariff['price_usdt']} USDT\n\n"
+        f"рџ’° РђРґСЂРµСЃ РєРѕС€РµР»СЊРєР° USDT (BEP-20):\n"
         f"`{USDT_WALLET}`\n\n"
-        f"⚠️ Внимание! Отправляйте ТОЛЬКО USDT по сети BEP-20 (Binance Smart Chain)!\n\n"
-        f"После оплаты нажми кнопку ниже.\n"
-        f"Доступ будет активирован в течение 15 минут.",
+        f"вљ пёЏ Р’РЅРёРјР°РЅРёРµ! РћС‚РїСЂР°РІР»СЏР№С‚Рµ РўРћР›Р¬РљРћ USDT РїРѕ СЃРµС‚Рё BEP-20 (Binance Smart Chain)!\n\n"
+        f"РџРѕСЃР»Рµ РѕРїР»Р°С‚С‹ РЅР°Р¶РјРё РєРЅРѕРїРєСѓ РЅРёР¶Рµ.\n"
+        f"Р”РѕСЃС‚СѓРї Р±СѓРґРµС‚ Р°РєС‚РёРІРёСЂРѕРІР°РЅ РІ С‚РµС‡РµРЅРёРµ 15 РјРёРЅСѓС‚.",
         reply_markup=reply_markup,
         parse_mode='Markdown'
     )
 
 
 async def payment_confirmation(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Подтверждение оплаты от пользователя"""
+    """РџРѕРґС‚РІРµСЂР¶РґРµРЅРёРµ РѕРїР»Р°С‚С‹ РѕС‚ РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ"""
     query = update.callback_query
-    await query.answer()
+    await safe_answer_callback(query)
 
-    # Безопасный парсинг callback_data: paid_METHOD_REQUEST_ID_TARIFF_KEY
+    # Р‘РµР·РѕРїР°СЃРЅС‹Р№ РїР°СЂСЃРёРЅРі callback_data: paid_METHOD_REQUEST_ID_TARIFF_KEY
     try:
-        # Убираем префикс 'paid_'
+        # РЈР±РёСЂР°РµРј РїСЂРµС„РёРєСЃ 'paid_'
         data = query.data.replace('paid_', '')
         parts = data.split('_')
 
-        # Определяем метод оплаты
-        payment_method = parts[0]  # card или usdt
+        # РћРїСЂРµРґРµР»СЏРµРј РјРµС‚РѕРґ РѕРїР»Р°С‚С‹
+        payment_method = parts[0]  # card РёР»Рё usdt
         request_id = int(parts[1])
-        tariff_key = '_'.join(parts[2:])  # Соединяем все части после request_id: '1_day'
+        tariff_key = '_'.join(parts[2:])  # РЎРѕРµРґРёРЅСЏРµРј РІСЃРµ С‡Р°СЃС‚Рё РїРѕСЃР»Рµ request_id: '1_day'
 
-        # Проверяем корректность тарифа
+        # РџСЂРѕРІРµСЂСЏРµРј РєРѕСЂСЂРµРєС‚РЅРѕСЃС‚СЊ С‚Р°СЂРёС„Р°
         if tariff_key not in TARIFFS:
-            await query.answer("❌ Некорректный тариф", show_alert=True)
-            logger.error(f"Некорректный tariff_key в payment_confirmation: {tariff_key}")
+            await safe_answer_callback(query, "вќЊ РќРµРєРѕСЂСЂРµРєС‚РЅС‹Р№ С‚Р°СЂРёС„", show_alert=True)
+            logger.error(f"РќРµРєРѕСЂСЂРµРєС‚РЅС‹Р№ tariff_key РІ payment_confirmation: {tariff_key}")
             return
 
         tariff = TARIFFS[tariff_key]
     except (IndexError, ValueError) as e:
-        logger.error(f"Ошибка парсинга callback_data в payment_confirmation: {query.data}, {e}")
-        await query.answer("❌ Некорректные данные", show_alert=True)
+        logger.error(f"РћС€РёР±РєР° РїР°СЂСЃРёРЅРіР° callback_data РІ payment_confirmation: {query.data}, {e}")
+        await safe_answer_callback(query, "вќЊ РќРµРєРѕСЂСЂРµРєС‚РЅС‹Рµ РґР°РЅРЅС‹Рµ", show_alert=True)
         return
     
     user_id = query.from_user.id
 
-    # Определяем сообщение в зависимости от метода оплаты
+    # РћРїСЂРµРґРµР»СЏРµРј СЃРѕРѕР±С‰РµРЅРёРµ РІ Р·Р°РІРёСЃРёРјРѕСЃС‚Рё РѕС‚ РјРµС‚РѕРґР° РѕРїР»Р°С‚С‹
     payment_info = ""
     if payment_method == 'card':
-        payment_info = f"📱 Мобильный - {tariff['price']}₽"
+        payment_info = f"рџ“± РњРѕР±РёР»СЊРЅС‹Р№ - {tariff['price']}в‚Ѕ"
     elif payment_method == 'usdt':
-        payment_info = f"💵 USDT - {tariff['price_usdt']} USDT"
+        payment_info = f"рџ’µ USDT - {tariff['price_usdt']} USDT"
 
-    # Уведомляем админа с кнопкой активации
+    # РЈРІРµРґРѕРјР»СЏРµРј Р°РґРјРёРЅР° СЃ РєРЅРѕРїРєРѕР№ Р°РєС‚РёРІР°С†РёРё
     try:
         keyboard = [[
             InlineKeyboardButton(
-                f"✅ Активировать ({tariff['name']})",
+                f"вњ… РђРєС‚РёРІРёСЂРѕРІР°С‚СЊ ({tariff['name']})",
                 callback_data=f'admin_activate_{user_id}_{tariff["days"]}'
             )
         ]]
@@ -381,171 +394,171 @@ async def payment_confirmation(update: Update, context: ContextTypes.DEFAULT_TYP
 
         await context.bot.send_message(
             chat_id=ADMIN_ID,
-            text=f"✅ Пользователь подтвердил оплату!\n\n"
-                 f"ID заявки: {request_id}\n"
-                 f"Способ оплаты: {payment_info}\n"
-                 f"Пользователь: @{query.from_user.username or 'без username'} "
+            text=f"вњ… РџРѕР»СЊР·РѕРІР°С‚РµР»СЊ РїРѕРґС‚РІРµСЂРґРёР» РѕРїР»Р°С‚Сѓ!\n\n"
+                 f"ID Р·Р°СЏРІРєРё: {request_id}\n"
+                 f"РЎРїРѕСЃРѕР± РѕРїР»Р°С‚С‹: {payment_info}\n"
+                 f"РџРѕР»СЊР·РѕРІР°С‚РµР»СЊ: @{query.from_user.username or 'Р±РµР· username'} "
                  f"({query.from_user.first_name})\n"
                  f"User ID: {user_id}\n"
-                 f"Тариф: {tariff['name']}\n\n"
-                 f"Проверь платеж и нажми кнопку ниже:",
+                 f"РўР°СЂРёС„: {tariff['name']}\n\n"
+                 f"РџСЂРѕРІРµСЂСЊ РїР»Р°С‚РµР¶ Рё РЅР°Р¶РјРё РєРЅРѕРїРєСѓ РЅРёР¶Рµ:",
             reply_markup=reply_markup
         )
     except Exception as e:
-        logger.error(f"Ошибка при уведомлении админа о подтверждении: {e}")
+        logger.error(f"РћС€РёР±РєР° РїСЂРё СѓРІРµРґРѕРјР»РµРЅРёРё Р°РґРјРёРЅР° Рѕ РїРѕРґС‚РІРµСЂР¶РґРµРЅРёРё: {e}")
     
     await query.edit_message_text(
-        "✅ Спасибо! Твоя заявка принята.\n\n"
-        "⏳ Ожидай активации подписки (обычно в течение 5-10 минут).\n"
-        "Как только доступ будет активирован, я сразу тебе напишу!",
+        "вњ… РЎРїР°СЃРёР±Рѕ! РўРІРѕСЏ Р·Р°СЏРІРєР° РїСЂРёРЅСЏС‚Р°.\n\n"
+        "вЏі РћР¶РёРґР°Р№ Р°РєС‚РёРІР°С†РёРё РїРѕРґРїРёСЃРєРё (РѕР±С‹С‡РЅРѕ РІ С‚РµС‡РµРЅРёРµ 5-10 РјРёРЅСѓС‚).\n"
+        "РљР°Рє С‚РѕР»СЊРєРѕ РґРѕСЃС‚СѓРї Р±СѓРґРµС‚ Р°РєС‚РёРІРёСЂРѕРІР°РЅ, СЏ СЃСЂР°Р·Сѓ С‚РµР±Рµ РЅР°РїРёС€Сѓ!",
         reply_markup=InlineKeyboardMarkup([[
-            InlineKeyboardButton("🏠 В начало", callback_data='go_start')
+            InlineKeyboardButton("рџЏ  Р’ РЅР°С‡Р°Р»Рѕ", callback_data='go_start')
         ]])
     )
     
-    # Запланировать напоминание через 1 час
+    # Р—Р°РїР»Р°РЅРёСЂРѕРІР°С‚СЊ РЅР°РїРѕРјРёРЅР°РЅРёРµ С‡РµСЂРµР· 1 С‡Р°СЃ
     context.job_queue.run_once(
         send_payment_reminder,
-        3600,  # 3600 секунд = 1 час
+        3600,  # 3600 СЃРµРєСѓРЅРґ = 1 С‡Р°СЃ
         data={'user_id': user_id, 'request_id': request_id},
         name=f'reminder_{user_id}_{request_id}'
     )
 
 
 async def precheckout_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Подтверждение платежа Stars перед оплатой"""
+    """РџРѕРґС‚РІРµСЂР¶РґРµРЅРёРµ РїР»Р°С‚РµР¶Р° Stars РїРµСЂРµРґ РѕРїР»Р°С‚РѕР№"""
     query = update.pre_checkout_query
-    # Всегда подтверждаем платеж
-    await query.answer(ok=True)
+    # Р’СЃРµРіРґР° РїРѕРґС‚РІРµСЂР¶РґР°РµРј РїР»Р°С‚РµР¶
+    await safe_answer_callback(query, ok=True)
 
 
 async def successful_payment_stars(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработка успешной оплаты через Stars"""
+    """РћР±СЂР°Р±РѕС‚РєР° СѓСЃРїРµС€РЅРѕР№ РѕРїР»Р°С‚С‹ С‡РµСЂРµР· Stars"""
     payment = update.message.successful_payment
     user_id = update.effective_user.id
 
-    # Парсим payload: subscription_TARIFF_KEY_USER_ID
+    # РџР°СЂСЃРёРј payload: subscription_TARIFF_KEY_USER_ID
     try:
         payload_parts = payment.invoice_payload.split('_')
-        tariff_key = '_'.join(payload_parts[1:-1])  # Получаем tariff_key (например, "1_day")
+        tariff_key = '_'.join(payload_parts[1:-1])  # РџРѕР»СѓС‡Р°РµРј tariff_key (РЅР°РїСЂРёРјРµСЂ, "1_day")
 
         if tariff_key not in TARIFFS:
-            logger.error(f"Некорректный tariff_key из payload: {tariff_key}")
-            await update.message.reply_text("❌ Ошибка обработки платежа. Обратитесь к администратору.")
+            logger.error(f"РќРµРєРѕСЂСЂРµРєС‚РЅС‹Р№ tariff_key РёР· payload: {tariff_key}")
+            await update.message.reply_text("вќЊ РћС€РёР±РєР° РѕР±СЂР°Р±РѕС‚РєРё РїР»Р°С‚РµР¶Р°. РћР±СЂР°С‚РёС‚РµСЃСЊ Рє Р°РґРјРёРЅРёСЃС‚СЂР°С‚РѕСЂСѓ.")
             return
 
         tariff = TARIFFS[tariff_key]
 
-        # Активируем подписку автоматически
+        # РђРєС‚РёРІРёСЂСѓРµРј РїРѕРґРїРёСЃРєСѓ Р°РІС‚РѕРјР°С‚РёС‡РµСЃРєРё
         end_date = db.add_subscription(user_id, tariff['days'], tariff_key)
 
-        # Уведомляем админа об успешной оплате Stars
+        # РЈРІРµРґРѕРјР»СЏРµРј Р°РґРјРёРЅР° РѕР± СѓСЃРїРµС€РЅРѕР№ РѕРїР»Р°С‚Рµ Stars
         try:
             await context.bot.send_message(
                 chat_id=ADMIN_ID,
-                text=f"⭐ Успешная оплата через Stars!\n\n"
-                     f"Пользователь: @{update.effective_user.username or 'без username'} "
+                text=f"в­ђ РЈСЃРїРµС€РЅР°СЏ РѕРїР»Р°С‚Р° С‡РµСЂРµР· Stars!\n\n"
+                     f"РџРѕР»СЊР·РѕРІР°С‚РµР»СЊ: @{update.effective_user.username or 'Р±РµР· username'} "
                      f"({update.effective_user.first_name})\n"
                      f"User ID: {user_id}\n"
-                     f"Тариф: {tariff['name']}\n"
-                     f"Сумма: {tariff['price_stars']} Stars\n"
-                     f"Подписка активирована до: {end_date.strftime('%d.%m.%Y %H:%M')}"
+                     f"РўР°СЂРёС„: {tariff['name']}\n"
+                     f"РЎСѓРјРјР°: {tariff['price_stars']} Stars\n"
+                     f"РџРѕРґРїРёСЃРєР° Р°РєС‚РёРІРёСЂРѕРІР°РЅР° РґРѕ: {end_date.strftime('%d.%m.%Y %H:%M')}"
             )
         except Exception as e:
-            logger.error(f"Ошибка при уведомлении админа об оплате Stars: {e}")
+            logger.error(f"РћС€РёР±РєР° РїСЂРё СѓРІРµРґРѕРјР»РµРЅРёРё Р°РґРјРёРЅР° РѕР± РѕРїР»Р°С‚Рµ Stars: {e}")
 
-        # Уведомляем пользователя
+        # РЈРІРµРґРѕРјР»СЏРµРј РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ
         await update.message.reply_text(
-            f"🎉 Оплата успешна!\n\n"
-            f"✅ Подписка активирована!\n"
-            f"Тариф: {tariff['name']}\n"
-            f"Активна до: {end_date.strftime('%d.%m.%Y %H:%M')}"
+            f"рџЋ‰ РћРїР»Р°С‚Р° СѓСЃРїРµС€РЅР°!\n\n"
+            f"вњ… РџРѕРґРїРёСЃРєР° Р°РєС‚РёРІРёСЂРѕРІР°РЅР°!\n"
+            f"РўР°СЂРёС„: {tariff['name']}\n"
+            f"РђРєС‚РёРІРЅР° РґРѕ: {end_date.strftime('%d.%m.%Y %H:%M')}"
         )
 
-        # Проверяем есть ли сохраненные результаты поиска
+        # РџСЂРѕРІРµСЂСЏРµРј РµСЃС‚СЊ Р»Рё СЃРѕС…СЂР°РЅРµРЅРЅС‹Рµ СЂРµР·СѓР»СЊС‚Р°С‚С‹ РїРѕРёСЃРєР°
         if user_id in user_search_results:
-            # Есть сохраненные результаты - показываем их
+            # Р•СЃС‚СЊ СЃРѕС…СЂР°РЅРµРЅРЅС‹Рµ СЂРµР·СѓР»СЊС‚Р°С‚С‹ - РїРѕРєР°Р·С‹РІР°РµРј РёС…
             filtered = user_search_results[user_id]
 
             await context.bot.send_message(
                 chat_id=user_id,
-                text=f"🔍 Вот результаты твоего поиска ({len(filtered)} вариантов):"
+                text=f"рџ”Ќ Р’РѕС‚ СЂРµР·СѓР»СЊС‚Р°С‚С‹ С‚РІРѕРµРіРѕ РїРѕРёСЃРєР° ({len(filtered)} РІР°СЂРёР°РЅС‚РѕРІ):"
             )
 
             await show_results_function(context, user_id, filtered)
 
-            # Очищаем сохраненные результаты
+            # РћС‡РёС‰Р°РµРј СЃРѕС…СЂР°РЅРµРЅРЅС‹Рµ СЂРµР·СѓР»СЊС‚Р°С‚С‹
             del user_search_results[user_id]
 
-            # Очищаем фильтры
+            # РћС‡РёС‰Р°РµРј С„РёР»СЊС‚СЂС‹
             if user_id in user_filters:
                 del user_filters[user_id]
         else:
-            # Нет сохраненных результатов - начинаем новый поиск
+            # РќРµС‚ СЃРѕС…СЂР°РЅРµРЅРЅС‹С… СЂРµР·СѓР»СЊС‚Р°С‚РѕРІ - РЅР°С‡РёРЅР°РµРј РЅРѕРІС‹Р№ РїРѕРёСЃРє
             user_filters[user_id] = {}
 
             keyboard = [
-                [InlineKeyboardButton("🏖️ Ейск", callback_data='location_ейск')],
-                [InlineKeyboardButton("🌊 Должанская", callback_data='location_должанская')]
+                [InlineKeyboardButton("рџЏ–пёЏ Р•Р№СЃРє", callback_data='location_РµР№СЃРє')],
+                [InlineKeyboardButton("рџЊЉ Р”РѕР»Р¶Р°РЅСЃРєР°СЏ", callback_data='location_РґРѕР»Р¶Р°РЅСЃРєР°СЏ')]
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
 
             await context.bot.send_message(
                 chat_id=user_id,
-                text="🔍 Давай найдем жилье для тебя!\n\n1️⃣ Выбери населённый пункт:",
+                text="рџ”Ќ Р”Р°РІР°Р№ РЅР°Р№РґРµРј Р¶РёР»СЊРµ РґР»СЏ С‚РµР±СЏ!\n\n1пёЏвѓЈ Р’С‹Р±РµСЂРё РЅР°СЃРµР»С‘РЅРЅС‹Р№ РїСѓРЅРєС‚:",
                 reply_markup=reply_markup
             )
 
     except Exception as e:
-        logger.error(f"Ошибка при обработке успешной оплаты Stars: {e}")
+        logger.error(f"РћС€РёР±РєР° РїСЂРё РѕР±СЂР°Р±РѕС‚РєРµ СѓСЃРїРµС€РЅРѕР№ РѕРїР»Р°С‚С‹ Stars: {e}")
         await update.message.reply_text(
-            "❌ Произошла ошибка при активации подписки.\n"
-            "Пожалуйста, обратитесь к администратору."
+            "вќЊ РџСЂРѕРёР·РѕС€Р»Р° РѕС€РёР±РєР° РїСЂРё Р°РєС‚РёРІР°С†РёРё РїРѕРґРїРёСЃРєРё.\n"
+            "РџРѕР¶Р°Р»СѓР№СЃС‚Р°, РѕР±СЂР°С‚РёС‚РµСЃСЊ Рє Р°РґРјРёРЅРёСЃС‚СЂР°С‚РѕСЂСѓ."
         )
 
 
 async def send_payment_reminder(context: ContextTypes.DEFAULT_TYPE):
-    """Отправка напоминания если подписка не активирована через 1 час"""
+    """РћС‚РїСЂР°РІРєР° РЅР°РїРѕРјРёРЅР°РЅРёСЏ РµСЃР»Рё РїРѕРґРїРёСЃРєР° РЅРµ Р°РєС‚РёРІРёСЂРѕРІР°РЅР° С‡РµСЂРµР· 1 С‡Р°СЃ"""
     job_data = context.job.data
     user_id = job_data['user_id']
     request_id = job_data['request_id']
 
-    # Проверяем, активирована ли подписка
+    # РџСЂРѕРІРµСЂСЏРµРј, Р°РєС‚РёРІРёСЂРѕРІР°РЅР° Р»Рё РїРѕРґРїРёСЃРєР°
     has_subscription, end_date = db.check_subscription(user_id)
 
     if not has_subscription:
-        # Подписка не активирована - отправляем напоминание
+        # РџРѕРґРїРёСЃРєР° РЅРµ Р°РєС‚РёРІРёСЂРѕРІР°РЅР° - РѕС‚РїСЂР°РІР»СЏРµРј РЅР°РїРѕРјРёРЅР°РЅРёРµ
         try:
             await context.bot.send_message(
                 chat_id=user_id,
-                text=f"⏰ Прошел 1 час с момента подтверждения оплаты.\n\n"
-                     f"Если ваша подписка по каким-то причинам не активирована, "
-                     f"пожалуйста, обратитесь к администратору:\n"
-                     f"👤 https://t.me/Den_Shev_007\n\n"
-                     f"📎 Прикрепите чек об оплате.\n\n"
-                     f"Спасибо за понимание! 🙏"
+                text=f"вЏ° РџСЂРѕС€РµР» 1 С‡Р°СЃ СЃ РјРѕРјРµРЅС‚Р° РїРѕРґС‚РІРµСЂР¶РґРµРЅРёСЏ РѕРїР»Р°С‚С‹.\n\n"
+                     f"Р•СЃР»Рё РІР°С€Р° РїРѕРґРїРёСЃРєР° РїРѕ РєР°РєРёРј-С‚Рѕ РїСЂРёС‡РёРЅР°Рј РЅРµ Р°РєС‚РёРІРёСЂРѕРІР°РЅР°, "
+                     f"РїРѕР¶Р°Р»СѓР№СЃС‚Р°, РѕР±СЂР°С‚РёС‚РµСЃСЊ Рє Р°РґРјРёРЅРёСЃС‚СЂР°С‚РѕСЂСѓ:\n"
+                     f"рџ‘¤ https://t.me/Den_Shev_007\n\n"
+                     f"рџ“Ћ РџСЂРёРєСЂРµРїРёС‚Рµ С‡РµРє РѕР± РѕРїР»Р°С‚Рµ.\n\n"
+                     f"РЎРїР°СЃРёР±Рѕ Р·Р° РїРѕРЅРёРјР°РЅРёРµ! рџ™Џ"
             )
         except Exception as e:
-            logger.error(f"Ошибка при отправке напоминания пользователю {user_id}: {e}")
+            logger.error(f"РћС€РёР±РєР° РїСЂРё РѕС‚РїСЂР°РІРєРµ РЅР°РїРѕРјРёРЅР°РЅРёСЏ РїРѕР»СЊР·РѕРІР°С‚РµР»СЋ {user_id}: {e}")
 
 
 async def search_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Начало поиска жилья"""
+    """РќР°С‡Р°Р»Рѕ РїРѕРёСЃРєР° Р¶РёР»СЊСЏ"""
     user_id = update.effective_user.id
     
-    # Инициализируем фильтры для всех
+    # РРЅРёС†РёР°Р»РёР·РёСЂСѓРµРј С„РёР»СЊС‚СЂС‹ РґР»СЏ РІСЃРµС…
     user_filters[user_id] = {}
     
-    # ПЕРВЫЙ ВОПРОС - выбор населённого пункта
+    # РџР•Р Р’Р«Р™ Р’РћРџР РћРЎ - РІС‹Р±РѕСЂ РЅР°СЃРµР»С‘РЅРЅРѕРіРѕ РїСѓРЅРєС‚Р°
     keyboard = [
-        [InlineKeyboardButton("🏖️ Ейск", callback_data='location_ейск')],
-        [InlineKeyboardButton("🌊 Должанская", callback_data='location_должанская')]
+        [InlineKeyboardButton("рџЏ–пёЏ Р•Р№СЃРє", callback_data='location_РµР№СЃРє')],
+        [InlineKeyboardButton("рџЊЉ Р”РѕР»Р¶Р°РЅСЃРєР°СЏ", callback_data='location_РґРѕР»Р¶Р°РЅСЃРєР°СЏ')]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     await update.message.reply_text(
-        "🔍 Давай найдем идеальное жилье!\n\n"
-        "1️⃣ Выбери населённый пункт:",
+        "рџ”Ќ Р”Р°РІР°Р№ РЅР°Р№РґРµРј РёРґРµР°Р»СЊРЅРѕРµ Р¶РёР»СЊРµ!\n\n"
+        "1пёЏвѓЈ Р’С‹Р±РµСЂРё РЅР°СЃРµР»С‘РЅРЅС‹Р№ РїСѓРЅРєС‚:",
         reply_markup=reply_markup
     )
 
@@ -558,78 +571,78 @@ async def show_results_function(
     show_contacts=True,
     show_vk=True
 ):
-    """Вспомогательная функция для показа результатов с пагинацией"""
+    """Р’СЃРїРѕРјРѕРіР°С‚РµР»СЊРЅР°СЏ С„СѓРЅРєС†РёСЏ РґР»СЏ РїРѕРєР°Р·Р° СЂРµР·СѓР»СЊС‚Р°С‚РѕРІ СЃ РїР°РіРёРЅР°С†РёРµР№"""
     
-    RESULTS_PER_PAGE = 20  # Показываем по 20 за раз
+    RESULTS_PER_PAGE = 20  # РџРѕРєР°Р·С‹РІР°РµРј РїРѕ 20 Р·Р° СЂР°Р·
     
     total_results = len(filtered)
     end_index = min(start_index + RESULTS_PER_PAGE, total_results)
     current_batch = filtered[start_index:end_index]
     
-    # Первое сообщение только при start_index = 0
+    # РџРµСЂРІРѕРµ СЃРѕРѕР±С‰РµРЅРёРµ С‚РѕР»СЊРєРѕ РїСЂРё start_index = 0
     if start_index == 0:
         await context.bot.send_message(
             chat_id=user_id,
-            text=f"✅ Найдено вариантов: {total_results}\n\n"
-                 f"Сейчас покажу их по очереди:"
+            text=f"вњ… РќР°Р№РґРµРЅРѕ РІР°СЂРёР°РЅС‚РѕРІ: {total_results}\n\n"
+                 f"РЎРµР№С‡Р°СЃ РїРѕРєР°Р¶Сѓ РёС… РїРѕ РѕС‡РµСЂРµРґРё:"
         )
     
     for i, apt in enumerate(current_batch, start_index + 1):
-        # Заголовок
-        text = f"📍 Вариант {i} ⬇️⬇️⬇️\n\n"
+        # Р—Р°РіРѕР»РѕРІРѕРє
+        text = f"рџ“Ќ Р’Р°СЂРёР°РЅС‚ {i} в¬‡пёЏв¬‡пёЏв¬‡пёЏ\n\n"
         
-        # Основная информация
-        tip = apt.get('Тип_жилья', 'не указан')
-        if tip == '1-комн':
-            tip = '1-комнатная квартира'
-        elif tip == '2-комн':
-            tip = '2-комнатная квартира'
-        elif tip == '3-комн':
-            tip = '3-комнатная квартира'
-        elif tip == 'частный дом':
-            tip = 'Частный дом'
-        elif tip == 'гостевой дом':
-            tip = 'Гостевой дом'
+        # РћСЃРЅРѕРІРЅР°СЏ РёРЅС„РѕСЂРјР°С†РёСЏ
+        tip = apt.get('РўРёРї_Р¶РёР»СЊСЏ', 'РЅРµ СѓРєР°Р·Р°РЅ')
+        if tip == '1-РєРѕРјРЅ':
+            tip = '1-РєРѕРјРЅР°С‚РЅР°СЏ РєРІР°СЂС‚РёСЂР°'
+        elif tip == '2-РєРѕРјРЅ':
+            tip = '2-РєРѕРјРЅР°С‚РЅР°СЏ РєРІР°СЂС‚РёСЂР°'
+        elif tip == '3-РєРѕРјРЅ':
+            tip = '3-РєРѕРјРЅР°С‚РЅР°СЏ РєРІР°СЂС‚РёСЂР°'
+        elif tip == 'С‡Р°СЃС‚РЅС‹Р№ РґРѕРј':
+            tip = 'Р§Р°СЃС‚РЅС‹Р№ РґРѕРј'
+        elif tip == 'РіРѕСЃС‚РµРІРѕР№ РґРѕРј':
+            tip = 'Р“РѕСЃС‚РµРІРѕР№ РґРѕРј'
         
-        text += f"🏠 {tip}\n"
-        text += f"🏖️ {apt.get('Расстояние_от_моря_м', '?')} метров от моря\n"
-        text += f"👥 До {apt.get('Гостей_макс', '?')} гостей\n"
+        text += f"рџЏ  {tip}\n"
+        text += f"рџЏ–пёЏ {apt.get('Р Р°СЃСЃС‚РѕСЏРЅРёРµ_РѕС‚_РјРѕСЂСЏ_Рј', '?')} РјРµС‚СЂРѕРІ РѕС‚ РјРѕСЂСЏ\n"
+        text += f"рџ‘Ґ Р”Рѕ {apt.get('Р“РѕСЃС‚РµР№_РјР°РєСЃ', '?')} РіРѕСЃС‚РµР№\n"
         
-        # Цена
-        price = apt.get('Цена_за_сутки', '')
-        if price and price != 'по запросу':
-            text += f"💰 {price}₽/сутки\n"
+        # Р¦РµРЅР°
+        price = apt.get('Р¦РµРЅР°_Р·Р°_СЃСѓС‚РєРё', '')
+        if price and price != 'РїРѕ Р·Р°РїСЂРѕСЃСѓ':
+            text += f"рџ’° {price}в‚Ѕ/СЃСѓС‚РєРё\n"
         else:
-            text += f"💰 Цена по запросу\n"
+            text += f"рџ’° Р¦РµРЅР° РїРѕ Р·Р°РїСЂРѕСЃСѓ\n"
         
-        # Описание (если есть)
-        description = apt.get('Описание', '').strip()
+        # РћРїРёСЃР°РЅРёРµ (РµСЃР»Рё РµСЃС‚СЊ)
+        description = apt.get('РћРїРёСЃР°РЅРёРµ', '').strip()
         if description:
-            text += f"\n📝 {description}\n"
+            text += f"\nрџ“ќ {description}\n"
         
-        # Добавляем "ажиотажный" счетчик просмотров
+        # Р”РѕР±Р°РІР»СЏРµРј "Р°Р¶РёРѕС‚Р°Р¶РЅС‹Р№" СЃС‡РµС‚С‡РёРє РїСЂРѕСЃРјРѕС‚СЂРѕРІ
         apt_key = build_apartment_key(apt)
         views_count = get_fake_views_count(apt_key)
-        text += f"\n🔥 Этот вариант смотрели {views_count} раз\n"
+        text += f"\nрџ”Ґ Р­С‚РѕС‚ РІР°СЂРёР°РЅС‚ СЃРјРѕС‚СЂРµР»Рё {views_count} СЂР°Р·\n"
 
         if show_contacts:
-            # Контакты - сначала телефон
-            text += f"\n📞 {apt.get('Телефон', 'не указан')}\n"
+            # РљРѕРЅС‚Р°РєС‚С‹ - СЃРЅР°С‡Р°Р»Р° С‚РµР»РµС„РѕРЅ
+            text += f"\nрџ“ћ {apt.get('РўРµР»РµС„РѕРЅ', 'РЅРµ СѓРєР°Р·Р°РЅ')}\n"
 
-            # Потом имя хозяина (если есть)
-            owner = apt.get('Имя_хозяина', '').strip()
+            # РџРѕС‚РѕРј РёРјСЏ С…РѕР·СЏРёРЅР° (РµСЃР»Рё РµСЃС‚СЊ)
+            owner = apt.get('РРјСЏ_С…РѕР·СЏРёРЅР°', '').strip()
             if owner:
-                text += f"👤 {owner}\n"
+                text += f"рџ‘¤ {owner}\n"
         else:
-            text += "\n🔒 Контакты доступны после активации подписки\n"
+            text += "\nрџ”’ РљРѕРЅС‚Р°РєС‚С‹ РґРѕСЃС‚СѓРїРЅС‹ РїРѕСЃР»Рµ Р°РєС‚РёРІР°С†РёРё РїРѕРґРїРёСЃРєРё\n"
 
-        # VK ссылка с красивым текстом
-        vk_link = apt.get('VK_ссылка', '').strip()
+        # VK СЃСЃС‹Р»РєР° СЃ РєСЂР°СЃРёРІС‹Рј С‚РµРєСЃС‚РѕРј
+        vk_link = apt.get('VK_СЃСЃС‹Р»РєР°', '').strip()
         if show_vk and vk_link and vk_link.startswith('http'):
-            text += f"\n🔗 Подробнее здесь: {vk_link}"
+            text += f"\nрџ”— РџРѕРґСЂРѕР±РЅРµРµ Р·РґРµСЃСЊ: {vk_link}"
 
-        # Если есть фото
-        photo_url = apt.get('Фото_URL', '').strip()
+        # Р•СЃР»Рё РµСЃС‚СЊ С„РѕС‚Рѕ
+        photo_url = apt.get('Р¤РѕС‚Рѕ_URL', '').strip()
         if photo_url and photo_url.startswith('http'):
             try:
                 await context.bot.send_photo(
@@ -638,7 +651,7 @@ async def show_results_function(
                     caption=text
                 )
             except Exception as e:
-                logger.error(f"Ошибка при отправке фото: {e}")
+                logger.error(f"РћС€РёР±РєР° РїСЂРё РѕС‚РїСЂР°РІРєРµ С„РѕС‚Рѕ: {e}")
                 await context.bot.send_message(
                     chat_id=user_id,
                     text=text
@@ -649,43 +662,43 @@ async def show_results_function(
                 text=text
             )
     
-    # Проверяем есть ли еще результаты
+    # РџСЂРѕРІРµСЂСЏРµРј РµСЃС‚СЊ Р»Рё РµС‰Рµ СЂРµР·СѓР»СЊС‚Р°С‚С‹
     remaining = total_results - end_index
     
     if remaining > 0 and show_contacts:
-        # Есть еще результаты - показываем кнопку "Показать еще"
-        # Сохраняем данные для следующей порции
+        # Р•СЃС‚СЊ РµС‰Рµ СЂРµР·СѓР»СЊС‚Р°С‚С‹ - РїРѕРєР°Р·С‹РІР°РµРј РєРЅРѕРїРєСѓ "РџРѕРєР°Р·Р°С‚СЊ РµС‰Рµ"
+        # РЎРѕС…СЂР°РЅСЏРµРј РґР°РЅРЅС‹Рµ РґР»СЏ СЃР»РµРґСѓСЋС‰РµР№ РїРѕСЂС†РёРё
         user_pagination_data[user_id] = {
             'filtered': filtered,
             'next_index': end_index
         }
         
         keyboard = [
-            [InlineKeyboardButton(f"📋 Показать еще {remaining}", callback_data='show_more')],
-            [InlineKeyboardButton("🔔 Подписаться на новые", callback_data='alerts_subscribe')],
-            [InlineKeyboardButton("🔍 Новый поиск", callback_data='new_search')]
+            [InlineKeyboardButton(f"рџ“‹ РџРѕРєР°Р·Р°С‚СЊ РµС‰Рµ {remaining}", callback_data='show_more')],
+            [InlineKeyboardButton("рџ”” РџРѕРґРїРёСЃР°С‚СЊСЃСЏ РЅР° РЅРѕРІС‹Рµ", callback_data='alerts_subscribe')],
+            [InlineKeyboardButton("рџ”Ќ РќРѕРІС‹Р№ РїРѕРёСЃРє", callback_data='new_search')]
         ]
         
         await context.bot.send_message(
             chat_id=user_id,
-            text=f"✅ Показано {end_index} из {total_results} вариантов",
+            text=f"вњ… РџРѕРєР°Р·Р°РЅРѕ {end_index} РёР· {total_results} РІР°СЂРёР°РЅС‚РѕРІ",
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
     elif show_contacts:
-        # Все результаты показаны
+        # Р’СЃРµ СЂРµР·СѓР»СЊС‚Р°С‚С‹ РїРѕРєР°Р·Р°РЅС‹
         await context.bot.send_message(
             chat_id=user_id,
-            text="✅ Все результаты показаны!",
+            text="вњ… Р’СЃРµ СЂРµР·СѓР»СЊС‚Р°С‚С‹ РїРѕРєР°Р·Р°РЅС‹!",
             reply_markup=InlineKeyboardMarkup([[
-                InlineKeyboardButton("🔔 Подписаться на новые", callback_data='alerts_subscribe')
+                InlineKeyboardButton("рџ”” РџРѕРґРїРёСЃР°С‚СЊСЃСЏ РЅР° РЅРѕРІС‹Рµ", callback_data='alerts_subscribe')
             ], [
-                InlineKeyboardButton("🔍 Новый поиск", callback_data='new_search')
+                InlineKeyboardButton("рџ”Ќ РќРѕРІС‹Р№ РїРѕРёСЃРє", callback_data='new_search')
             ]])
         )
 
 
 async def show_preview_results_function(context, user_id, filtered):
-    """Показывает бесплатный превью: до 2 вариантов без контактов и без VK."""
+    """РџРѕРєР°Р·С‹РІР°РµС‚ Р±РµСЃРїР»Р°С‚РЅС‹Р№ РїСЂРµРІСЊСЋ: РґРѕ 2 РІР°СЂРёР°РЅС‚РѕРІ Р±РµР· РєРѕРЅС‚Р°РєС‚РѕРІ Рё Р±РµР· VK."""
     preview_items = filtered[:PREVIEW_RESULTS_LIMIT]
 
     if not preview_items:
@@ -694,8 +707,8 @@ async def show_preview_results_function(context, user_id, filtered):
     await context.bot.send_message(
         chat_id=user_id,
         text=(
-            f"👀 Бесплатный превью: {len(preview_items)} из {len(filtered)} вариантов\n\n"
-            f"Показываю примеры без контактов и без ссылок."
+            f"рџ‘Ђ Р‘РµСЃРїР»Р°С‚РЅС‹Р№ РїСЂРµРІСЊСЋ: {len(preview_items)} РёР· {len(filtered)} РІР°СЂРёР°РЅС‚РѕРІ\n\n"
+            f"РџРѕРєР°Р·С‹РІР°СЋ РїСЂРёРјРµСЂС‹ Р±РµР· РєРѕРЅС‚Р°РєС‚РѕРІ Рё Р±РµР· СЃСЃС‹Р»РѕРє."
         )
     )
 
@@ -710,16 +723,16 @@ async def show_preview_results_function(context, user_id, filtered):
 
 
 async def subscribe_alerts_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Включает уведомления о новых объявлениях."""
+    """Р’РєР»СЋС‡Р°РµС‚ СѓРІРµРґРѕРјР»РµРЅРёСЏ Рѕ РЅРѕРІС‹С… РѕР±СЉСЏРІР»РµРЅРёСЏС…."""
     query = update.callback_query
-    await query.answer()
+    await safe_answer_callback(query)
     user_id = query.from_user.id
 
     has_subscription, _ = db.check_subscription(user_id)
     if not has_subscription:
         await query.edit_message_text(
-            "🔒 Уведомления о новых вариантах доступны только при активной подписке.",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("💳 Купить подписку", callback_data='buy_1_day')]])
+            "рџ”’ РЈРІРµРґРѕРјР»РµРЅРёСЏ Рѕ РЅРѕРІС‹С… РІР°СЂРёР°РЅС‚Р°С… РґРѕСЃС‚СѓРїРЅС‹ С‚РѕР»СЊРєРѕ РїСЂРё Р°РєС‚РёРІРЅРѕР№ РїРѕРґРїРёСЃРєРµ.",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("рџ’і РљСѓРїРёС‚СЊ РїРѕРґРїРёСЃРєСѓ", callback_data='buy_1_day')]])
         )
         return
 
@@ -727,12 +740,12 @@ async def subscribe_alerts_handler(update: Update, context: ContextTypes.DEFAULT
     await seed_seen_apartments_for_user(user_id)
 
     await query.edit_message_text(
-        "🔔 Готово! Теперь буду присылать новые объявления автоматически."
+        "рџ”” Р“РѕС‚РѕРІРѕ! РўРµРїРµСЂСЊ Р±СѓРґСѓ РїСЂРёСЃС‹Р»Р°С‚СЊ РЅРѕРІС‹Рµ РѕР±СЉСЏРІР»РµРЅРёСЏ Р°РІС‚РѕРјР°С‚РёС‡РµСЃРєРё."
     )
 
 
 async def check_new_apartments_job(context: ContextTypes.DEFAULT_TYPE):
-    """Периодически проверяет новые объявления и рассылает уведомления подписчикам."""
+    """РџРµСЂРёРѕРґРёС‡РµСЃРєРё РїСЂРѕРІРµСЂСЏРµС‚ РЅРѕРІС‹Рµ РѕР±СЉСЏРІР»РµРЅРёСЏ Рё СЂР°СЃСЃС‹Р»Р°РµС‚ СѓРІРµРґРѕРјР»РµРЅРёСЏ РїРѕРґРїРёСЃС‡РёРєР°Рј."""
     user_ids = db.get_alert_subscribers()
     if not user_ids:
         return
@@ -758,106 +771,106 @@ async def check_new_apartments_job(context: ContextTypes.DEFAULT_TYPE):
         try:
             await context.bot.send_message(
                 chat_id=user_id,
-                text=f"🆕 Появились новые объявления: {len(new_keys)} шт. Показываю свежие:"
+                text=f"рџ†• РџРѕСЏРІРёР»РёСЃСЊ РЅРѕРІС‹Рµ РѕР±СЉСЏРІР»РµРЅРёСЏ: {len(new_keys)} С€С‚. РџРѕРєР°Р·С‹РІР°СЋ СЃРІРµР¶РёРµ:"
             )
             await show_results_function(context, user_id, new_apartments, show_contacts=True, show_vk=True)
         except Exception as e:
-            logger.error(f"Ошибка отправки уведомления о новых объявлениях для user_id={user_id}: {e}")
+            logger.error(f"РћС€РёР±РєР° РѕС‚РїСЂР°РІРєРё СѓРІРµРґРѕРјР»РµРЅРёСЏ Рѕ РЅРѕРІС‹С… РѕР±СЉСЏРІР»РµРЅРёСЏС… РґР»СЏ user_id={user_id}: {e}")
 
 
 async def select_location(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Выбор населённого пункта"""
+    """Р’С‹Р±РѕСЂ РЅР°СЃРµР»С‘РЅРЅРѕРіРѕ РїСѓРЅРєС‚Р°"""
     query = update.callback_query
-    await query.answer()
+    await safe_answer_callback(query)
     
     user_id = query.from_user.id
     location = query.data.replace('location_', '')
     
-    # Инициализируем фильтры если их нет
+    # РРЅРёС†РёР°Р»РёР·РёСЂСѓРµРј С„РёР»СЊС‚СЂС‹ РµСЃР»Рё РёС… РЅРµС‚
     if user_id not in user_filters:
         user_filters[user_id] = {}
     
-    # Сохраняем выбор
+    # РЎРѕС…СЂР°РЅСЏРµРј РІС‹Р±РѕСЂ
     user_filters[user_id]['location'] = location
     
-    # Если выбрана Должанская - сразу показываем все объявления
-    if location == 'должанская':
-        await query.edit_message_text("🔍 Ищу все варианты в Должанской...")
+    # Р•СЃР»Рё РІС‹Р±СЂР°РЅР° Р”РѕР»Р¶Р°РЅСЃРєР°СЏ - СЃСЂР°Р·Сѓ РїРѕРєР°Р·С‹РІР°РµРј РІСЃРµ РѕР±СЉСЏРІР»РµРЅРёСЏ
+    if location == 'РґРѕР»Р¶Р°РЅСЃРєР°СЏ':
+        await query.edit_message_text("рџ”Ќ РС‰Сѓ РІСЃРµ РІР°СЂРёР°РЅС‚С‹ РІ Р”РѕР»Р¶Р°РЅСЃРєРѕР№...")
         
-        # Получаем все объявления Должанской
+        # РџРѕР»СѓС‡Р°РµРј РІСЃРµ РѕР±СЉСЏРІР»РµРЅРёСЏ Р”РѕР»Р¶Р°РЅСЃРєРѕР№
         all_apartments = sheets.read_apartments()
-        filtered = [apt for apt in all_apartments if apt.get('Населенный_пункт', '').lower() == 'должанская']
+        filtered = [apt for apt in all_apartments if apt.get('РќР°СЃРµР»РµРЅРЅС‹Р№_РїСѓРЅРєС‚', '').lower() == 'РґРѕР»Р¶Р°РЅСЃРєР°СЏ']
         
-        # Логируем поиск
+        # Р›РѕРіРёСЂСѓРµРј РїРѕРёСЃРє
         db.log_search(user_id, user_filters[user_id], len(filtered))
         
         if not filtered:
             await context.bot.send_message(
                 chat_id=user_id,
-                text="😔 К сожалению, в Должанской пока нет объявлений.\n\n"
-                     "Попробуй поискать в Ейске:",
+                text="рџ” Рљ СЃРѕР¶Р°Р»РµРЅРёСЋ, РІ Р”РѕР»Р¶Р°РЅСЃРєРѕР№ РїРѕРєР° РЅРµС‚ РѕР±СЉСЏРІР»РµРЅРёР№.\n\n"
+                     "РџРѕРїСЂРѕР±СѓР№ РїРѕРёСЃРєР°С‚СЊ РІ Р•Р№СЃРєРµ:",
                 reply_markup=InlineKeyboardMarkup([[
-                    InlineKeyboardButton("🔍 Новый поиск", callback_data='new_search')
+                    InlineKeyboardButton("рџ”Ќ РќРѕРІС‹Р№ РїРѕРёСЃРє", callback_data='new_search')
                 ]])
             )
             if user_id in user_filters:
                 del user_filters[user_id]
             return
         
-        # Проверяем подписку
+        # РџСЂРѕРІРµСЂСЏРµРј РїРѕРґРїРёСЃРєСѓ
         has_subscription, end_date = db.check_subscription(user_id)
         
         if has_subscription:
-            # Если есть подписка - показываем результаты
+            # Р•СЃР»Рё РµСЃС‚СЊ РїРѕРґРїРёСЃРєР° - РїРѕРєР°Р·С‹РІР°РµРј СЂРµР·СѓР»СЊС‚Р°С‚С‹
             await show_results_function(context, user_id, filtered)
             
-            # Очищаем фильтры
+            # РћС‡РёС‰Р°РµРј С„РёР»СЊС‚СЂС‹
             if user_id in user_filters:
                 del user_filters[user_id]
         else:
-            # Если нет подписки - показываем количество и предлагаем оплатить
-            # Сохраняем результаты для показа после оплаты
+            # Р•СЃР»Рё РЅРµС‚ РїРѕРґРїРёСЃРєРё - РїРѕРєР°Р·С‹РІР°РµРј РєРѕР»РёС‡РµСЃС‚РІРѕ Рё РїСЂРµРґР»Р°РіР°РµРј РѕРїР»Р°С‚РёС‚СЊ
+            # РЎРѕС…СЂР°РЅСЏРµРј СЂРµР·СѓР»СЊС‚Р°С‚С‹ РґР»СЏ РїРѕРєР°Р·Р° РїРѕСЃР»Рµ РѕРїР»Р°С‚С‹
             user_search_results[user_id] = filtered
 
-            # Бесплатный превью (без контактов и VK)
+            # Р‘РµСЃРїР»Р°С‚РЅС‹Р№ РїСЂРµРІСЊСЋ (Р±РµР· РєРѕРЅС‚Р°РєС‚РѕРІ Рё VK)
             await show_preview_results_function(context, user_id, filtered)
             
             keyboard = [
-                [InlineKeyboardButton(f"💳 {TARIFFS['1_day']['name']} - {TARIFFS['1_day']['price']}₽",
+                [InlineKeyboardButton(f"рџ’і {TARIFFS['1_day']['name']} - {TARIFFS['1_day']['price']}в‚Ѕ",
                                      callback_data='buy_1_day')],
-                [InlineKeyboardButton(f"💳 {TARIFFS['7_days']['name']} - {TARIFFS['7_days']['price']}₽",
+                [InlineKeyboardButton(f"рџ’і {TARIFFS['7_days']['name']} - {TARIFFS['7_days']['price']}в‚Ѕ",
                                      callback_data='buy_7_days')],
-                [InlineKeyboardButton(f"💳 {TARIFFS['30_days']['name']} - {TARIFFS['30_days']['price']}₽",
+                [InlineKeyboardButton(f"рџ’і {TARIFFS['30_days']['name']} - {TARIFFS['30_days']['price']}в‚Ѕ",
                                      callback_data='buy_30_days')],
-                [InlineKeyboardButton("🔍 Новый поиск", callback_data='new_search')]
+                [InlineKeyboardButton("рџ”Ќ РќРѕРІС‹Р№ РїРѕРёСЃРє", callback_data='new_search')]
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
 
             await context.bot.send_message(
                 chat_id=user_id,
-                text=f"✅ Найдено вариантов: {len(filtered)}\n\n"
-                     f"Полный доступ к контактам и всем объявлениям открывается по подписке.\n\n"
-                     f"Выбери тариф:",
+                text=f"вњ… РќР°Р№РґРµРЅРѕ РІР°СЂРёР°РЅС‚РѕРІ: {len(filtered)}\n\n"
+                     f"РџРѕР»РЅС‹Р№ РґРѕСЃС‚СѓРї Рє РєРѕРЅС‚Р°РєС‚Р°Рј Рё РІСЃРµРј РѕР±СЉСЏРІР»РµРЅРёСЏРј РѕС‚РєСЂС‹РІР°РµС‚СЃСЏ РїРѕ РїРѕРґРїРёСЃРєРµ.\n\n"
+                     f"Р’С‹Р±РµСЂРё С‚Р°СЂРёС„:",
                 reply_markup=reply_markup
             )
 
-            # НЕ очищаем фильтры - они могут пригодиться
+            # РќР• РѕС‡РёС‰Р°РµРј С„РёР»СЊС‚СЂС‹ - РѕРЅРё РјРѕРіСѓС‚ РїСЂРёРіРѕРґРёС‚СЊСЃСЏ
 
-    # Если выбран Ейск - задаём вопросы
+    # Р•СЃР»Рё РІС‹Р±СЂР°РЅ Р•Р№СЃРє - Р·Р°РґР°С‘Рј РІРѕРїСЂРѕСЃС‹
     else:
         keyboard = [
-            [InlineKeyboardButton("🏠 1-комнатная", callback_data='type_1-комн')],
-            [InlineKeyboardButton("🏡 2-комнатная", callback_data='type_2-комн')],
-            [InlineKeyboardButton("🏘 3-комнатная", callback_data='type_3-комн')],
-            [InlineKeyboardButton("🏘️ Частный дом", callback_data='type_частный дом')],
-            [InlineKeyboardButton("🏨 Гостевой дом", callback_data='type_гостевой дом')],
-            [InlineKeyboardButton("➡️ Любой тип", callback_data='type_any')],
-            [InlineKeyboardButton("🔙 Назад", callback_data='go_start')]
+            [InlineKeyboardButton("рџЏ  1-РєРѕРјРЅР°С‚РЅР°СЏ", callback_data='type_1-РєРѕРјРЅ')],
+            [InlineKeyboardButton("рџЏЎ 2-РєРѕРјРЅР°С‚РЅР°СЏ", callback_data='type_2-РєРѕРјРЅ')],
+            [InlineKeyboardButton("рџЏ 3-РєРѕРјРЅР°С‚РЅР°СЏ", callback_data='type_3-РєРѕРјРЅ')],
+            [InlineKeyboardButton("рџЏпёЏ Р§Р°СЃС‚РЅС‹Р№ РґРѕРј", callback_data='type_С‡Р°СЃС‚РЅС‹Р№ РґРѕРј')],
+            [InlineKeyboardButton("рџЏЁ Р“РѕСЃС‚РµРІРѕР№ РґРѕРј", callback_data='type_РіРѕСЃС‚РµРІРѕР№ РґРѕРј')],
+            [InlineKeyboardButton("вћЎпёЏ Р›СЋР±РѕР№ С‚РёРї", callback_data='type_any')],
+            [InlineKeyboardButton("рџ”™ РќР°Р·Р°Рґ", callback_data='go_start')]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         
         await query.edit_message_text(
-            "2️⃣ Какой тип жилья тебе нужен?",
+            "2пёЏвѓЈ РљР°РєРѕР№ С‚РёРї Р¶РёР»СЊСЏ С‚РµР±Рµ РЅСѓР¶РµРЅ?",
             reply_markup=reply_markup
         )
     
@@ -865,343 +878,343 @@ async def select_location(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def select_type(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Выбор типа жилья"""
+    """Р’С‹Р±РѕСЂ С‚РёРїР° Р¶РёР»СЊСЏ"""
     query = update.callback_query
-    await query.answer()
+    await safe_answer_callback(query)
     
     user_id = query.from_user.id
     type_choice = query.data.replace('type_', '')
     
-    # Инициализируем фильтры если их нет
+    # РРЅРёС†РёР°Р»РёР·РёСЂСѓРµРј С„РёР»СЊС‚СЂС‹ РµСЃР»Рё РёС… РЅРµС‚
     if user_id not in user_filters:
         user_filters[user_id] = {}
     
     if type_choice != 'any':
         user_filters[user_id]['type'] = type_choice
     
-    # Вопрос о количестве гостей
+    # Р’РѕРїСЂРѕСЃ Рѕ РєРѕР»РёС‡РµСЃС‚РІРµ РіРѕСЃС‚РµР№
     keyboard = [
-        [InlineKeyboardButton("👤 1-2 гостя", callback_data='guests_2')],
-        [InlineKeyboardButton("👥 3-4 гостя", callback_data='guests_4')],
-        [InlineKeyboardButton("👨‍👩‍👧‍👦 5-6 гостей", callback_data='guests_6')],
-        [InlineKeyboardButton("🏢 7+ гостей", callback_data='guests_7')],
-        [InlineKeyboardButton("➡️ Не важно", callback_data='guests_any')],
-        [InlineKeyboardButton("🔙 Назад", callback_data='go_start')]
+        [InlineKeyboardButton("рџ‘¤ 1-2 РіРѕСЃС‚СЏ", callback_data='guests_2')],
+        [InlineKeyboardButton("рџ‘Ґ 3-4 РіРѕСЃС‚СЏ", callback_data='guests_4')],
+        [InlineKeyboardButton("рџ‘ЁвЂЌрџ‘©вЂЌрџ‘§вЂЌрџ‘¦ 5-6 РіРѕСЃС‚РµР№", callback_data='guests_6')],
+        [InlineKeyboardButton("рџЏў 7+ РіРѕСЃС‚РµР№", callback_data='guests_7')],
+        [InlineKeyboardButton("вћЎпёЏ РќРµ РІР°Р¶РЅРѕ", callback_data='guests_any')],
+        [InlineKeyboardButton("рџ”™ РќР°Р·Р°Рґ", callback_data='go_start')]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     await query.edit_message_text(
-        "3️⃣ Сколько человек будет отдыхать?",
+        "3пёЏвѓЈ РЎРєРѕР»СЊРєРѕ С‡РµР»РѕРІРµРє Р±СѓРґРµС‚ РѕС‚РґС‹С…Р°С‚СЊ?",
         reply_markup=reply_markup
     )
 
 
 async def select_guests(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Выбор количества гостей"""
+    """Р’С‹Р±РѕСЂ РєРѕР»РёС‡РµСЃС‚РІР° РіРѕСЃС‚РµР№"""
     query = update.callback_query
-    await query.answer()
+    await safe_answer_callback(query)
     
     user_id = query.from_user.id
     guests_choice = query.data.replace('guests_', '')
     
-    # Инициализируем фильтры если их нет
+    # РРЅРёС†РёР°Р»РёР·РёСЂСѓРµРј С„РёР»СЊС‚СЂС‹ РµСЃР»Рё РёС… РЅРµС‚
     if user_id not in user_filters:
         user_filters[user_id] = {}
     
     if guests_choice != 'any':
         user_filters[user_id]['guests'] = int(guests_choice)
     
-    # ПРОВЕРКА: Если гостевой дом + 5-6 или 7+ гостей → спрашиваем про 2 номера
-    is_guesthouse = user_filters[user_id].get('type') == 'гостевой дом'
-    is_many_guests = guests_choice in ['6', '7']  # 5-6 гостей или 7+
+    # РџР РћР’Р•Р РљРђ: Р•СЃР»Рё РіРѕСЃС‚РµРІРѕР№ РґРѕРј + 5-6 РёР»Рё 7+ РіРѕСЃС‚РµР№ в†’ СЃРїСЂР°С€РёРІР°РµРј РїСЂРѕ 2 РЅРѕРјРµСЂР°
+    is_guesthouse = user_filters[user_id].get('type') == 'РіРѕСЃС‚РµРІРѕР№ РґРѕРј'
+    is_many_guests = guests_choice in ['6', '7']  # 5-6 РіРѕСЃС‚РµР№ РёР»Рё 7+
     
     if is_guesthouse and is_many_guests:
-        # Задаём дополнительный вопрос про 2 номера
+        # Р—Р°РґР°С‘Рј РґРѕРїРѕР»РЅРёС‚РµР»СЊРЅС‹Р№ РІРѕРїСЂРѕСЃ РїСЂРѕ 2 РЅРѕРјРµСЂР°
         keyboard = [
-            [InlineKeyboardButton("✅ Да, подойдет 2 номера", callback_data='two_rooms_yes')],
-            [InlineKeyboardButton("❌ Нет, нужен один номер", callback_data='two_rooms_no')],
-            [InlineKeyboardButton("🔙 Назад", callback_data='go_start')]
+            [InlineKeyboardButton("вњ… Р”Р°, РїРѕРґРѕР№РґРµС‚ 2 РЅРѕРјРµСЂР°", callback_data='two_rooms_yes')],
+            [InlineKeyboardButton("вќЊ РќРµС‚, РЅСѓР¶РµРЅ РѕРґРёРЅ РЅРѕРјРµСЂ", callback_data='two_rooms_no')],
+            [InlineKeyboardButton("рџ”™ РќР°Р·Р°Рґ", callback_data='go_start')]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         
         await query.edit_message_text(
-            "💡 Вам подойдет 2 номера?\n\n"
-            "Это увеличит шансы найти варианты для большой компании!",
+            "рџ’Ў Р’Р°Рј РїРѕРґРѕР№РґРµС‚ 2 РЅРѕРјРµСЂР°?\n\n"
+            "Р­С‚Рѕ СѓРІРµР»РёС‡РёС‚ С€Р°РЅСЃС‹ РЅР°Р№С‚Рё РІР°СЂРёР°РЅС‚С‹ РґР»СЏ Р±РѕР»СЊС€РѕР№ РєРѕРјРїР°РЅРёРё!",
             reply_markup=reply_markup
         )
         return
     
-    # Обычный вопрос о расстоянии от моря
+    # РћР±С‹С‡РЅС‹Р№ РІРѕРїСЂРѕСЃ Рѕ СЂР°СЃСЃС‚РѕСЏРЅРёРё РѕС‚ РјРѕСЂСЏ
     keyboard = [
-        [InlineKeyboardButton("🏖️ До 100м", callback_data='dist_0-100')],
-        [InlineKeyboardButton("🚶 150-500м", callback_data='dist_150-500')],
-        [InlineKeyboardButton("🚗 500-1000м", callback_data='dist_500-1000')],
-        [InlineKeyboardButton("🏙️ Более 1000м", callback_data='dist_1000-99999')],
-        [InlineKeyboardButton("➡️ Не важно", callback_data='dist_any')],
-        [InlineKeyboardButton("🔙 Назад", callback_data='go_start')]
+        [InlineKeyboardButton("рџЏ–пёЏ Р”Рѕ 100Рј", callback_data='dist_0-100')],
+        [InlineKeyboardButton("рџљ¶ 150-500Рј", callback_data='dist_150-500')],
+        [InlineKeyboardButton("рџљ— 500-1000Рј", callback_data='dist_500-1000')],
+        [InlineKeyboardButton("рџЏ™пёЏ Р‘РѕР»РµРµ 1000Рј", callback_data='dist_1000-99999')],
+        [InlineKeyboardButton("вћЎпёЏ РќРµ РІР°Р¶РЅРѕ", callback_data='dist_any')],
+        [InlineKeyboardButton("рџ”™ РќР°Р·Р°Рґ", callback_data='go_start')]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     await query.edit_message_text(
-        "4️⃣ На каком расстоянии от моря?",
+        "4пёЏвѓЈ РќР° РєР°РєРѕРј СЂР°СЃСЃС‚РѕСЏРЅРёРё РѕС‚ РјРѕСЂСЏ?",
         reply_markup=reply_markup
     )
 
 
 async def select_two_rooms(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработка ответа на вопрос про 2 номера"""
+    """РћР±СЂР°Р±РѕС‚РєР° РѕС‚РІРµС‚Р° РЅР° РІРѕРїСЂРѕСЃ РїСЂРѕ 2 РЅРѕРјРµСЂР°"""
     query = update.callback_query
-    await query.answer()
+    await safe_answer_callback(query)
     
     user_id = query.from_user.id
     answer = query.data.replace('two_rooms_', '')
     
-    # Инициализируем фильтры если их нет
+    # РРЅРёС†РёР°Р»РёР·РёСЂСѓРµРј С„РёР»СЊС‚СЂС‹ РµСЃР»Рё РёС… РЅРµС‚
     if user_id not in user_filters:
         user_filters[user_id] = {}
     
-    # Если ДА - меняем фильтр на 3-6 человек
+    # Р•СЃР»Рё Р”Рђ - РјРµРЅСЏРµРј С„РёР»СЊС‚СЂ РЅР° 3-6 С‡РµР»РѕРІРµРє
     if answer == 'yes':
-        user_filters[user_id]['guests'] = 6  # Ищем номера до 6 человек
-        user_filters[user_id]['two_rooms_mode'] = True  # Флаг что ищем 2 номера
-    # Если НЕТ - оставляем как есть (5-6 или 7+)
+        user_filters[user_id]['guests'] = 6  # РС‰РµРј РЅРѕРјРµСЂР° РґРѕ 6 С‡РµР»РѕРІРµРє
+        user_filters[user_id]['two_rooms_mode'] = True  # Р¤Р»Р°Рі С‡С‚Рѕ РёС‰РµРј 2 РЅРѕРјРµСЂР°
+    # Р•СЃР»Рё РќР•Рў - РѕСЃС‚Р°РІР»СЏРµРј РєР°Рє РµСЃС‚СЊ (5-6 РёР»Рё 7+)
     
-    # Переходим к вопросу о расстоянии
+    # РџРµСЂРµС…РѕРґРёРј Рє РІРѕРїСЂРѕСЃСѓ Рѕ СЂР°СЃСЃС‚РѕСЏРЅРёРё
     keyboard = [
-        [InlineKeyboardButton("🏖️ До 100м", callback_data='dist_0-100')],
-        [InlineKeyboardButton("🚶 150-500м", callback_data='dist_150-500')],
-        [InlineKeyboardButton("🚗 500-1000м", callback_data='dist_500-1000')],
-        [InlineKeyboardButton("🏙️ Более 1000м", callback_data='dist_1000-99999')],
-        [InlineKeyboardButton("➡️ Не важно", callback_data='dist_any')],
-        [InlineKeyboardButton("🔙 Назад", callback_data='go_start')]
+        [InlineKeyboardButton("рџЏ–пёЏ Р”Рѕ 100Рј", callback_data='dist_0-100')],
+        [InlineKeyboardButton("рџљ¶ 150-500Рј", callback_data='dist_150-500')],
+        [InlineKeyboardButton("рџљ— 500-1000Рј", callback_data='dist_500-1000')],
+        [InlineKeyboardButton("рџЏ™пёЏ Р‘РѕР»РµРµ 1000Рј", callback_data='dist_1000-99999')],
+        [InlineKeyboardButton("вћЎпёЏ РќРµ РІР°Р¶РЅРѕ", callback_data='dist_any')],
+        [InlineKeyboardButton("рџ”™ РќР°Р·Р°Рґ", callback_data='go_start')]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     await query.edit_message_text(
-        "4️⃣ На каком расстоянии от моря?",
+        "4пёЏвѓЈ РќР° РєР°РєРѕРј СЂР°СЃСЃС‚РѕСЏРЅРёРё РѕС‚ РјРѕСЂСЏ?",
         reply_markup=reply_markup
     )
 
 
 async def select_distance(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Выбор расстояния от моря - ПОСЛЕДНИЙ вопрос, затем показ результатов"""
+    """Р’С‹Р±РѕСЂ СЂР°СЃСЃС‚РѕСЏРЅРёСЏ РѕС‚ РјРѕСЂСЏ - РџРћРЎР›Р•Р”РќРР™ РІРѕРїСЂРѕСЃ, Р·Р°С‚РµРј РїРѕРєР°Р· СЂРµР·СѓР»СЊС‚Р°С‚РѕРІ"""
     query = update.callback_query
-    await query.answer()
+    await safe_answer_callback(query)
     
     user_id = query.from_user.id
     dist_choice = query.data.replace('dist_', '')
     
-    # Инициализируем фильтры если их нет
+    # РРЅРёС†РёР°Р»РёР·РёСЂСѓРµРј С„РёР»СЊС‚СЂС‹ РµСЃР»Рё РёС… РЅРµС‚
     if user_id not in user_filters:
         user_filters[user_id] = {}
     
-    # Парсим диапазон (например "150-500" или "0-100")
+    # РџР°СЂСЃРёРј РґРёР°РїР°Р·РѕРЅ (РЅР°РїСЂРёРјРµСЂ "150-500" РёР»Рё "0-100")
     if dist_choice != 'any':
         min_dist, max_dist = dist_choice.split('-')
         user_filters[user_id]['min_distance'] = int(min_dist)
         user_filters[user_id]['max_distance'] = int(max_dist)
     
-    # ПРОВЕРКА: если не выбран ни один фильтр кроме города → просим уточнить
+    # РџР РћР’Р•Р РљРђ: РµСЃР»Рё РЅРµ РІС‹Р±СЂР°РЅ РЅРё РѕРґРёРЅ С„РёР»СЊС‚СЂ РєСЂРѕРјРµ РіРѕСЂРѕРґР° в†’ РїСЂРѕСЃРёРј СѓС‚РѕС‡РЅРёС‚СЊ
     filters = user_filters[user_id]
     has_filters = any([
-        filters.get('type'),           # тип жилья
-        filters.get('guests'),         # количество гостей
-        filters.get('min_distance'),   # расстояние от моря
+        filters.get('type'),           # С‚РёРї Р¶РёР»СЊСЏ
+        filters.get('guests'),         # РєРѕР»РёС‡РµСЃС‚РІРѕ РіРѕСЃС‚РµР№
+        filters.get('min_distance'),   # СЂР°СЃСЃС‚РѕСЏРЅРёРµ РѕС‚ РјРѕСЂСЏ
         filters.get('max_distance')
     ])
     
     if not has_filters:
         await query.edit_message_text(
-            "🤔 Вы не выбрали ни один параметр поиска.\n\n"
-            "Пожалуйста, выберите хотя бы один из фильтров "
-            "(тип жилья, количество гостей или расстояние до моря), "
-            "чтобы я мог найти для вас подходящие варианты!",
+            "рџ¤” Р’С‹ РЅРµ РІС‹Р±СЂР°Р»Рё РЅРё РѕРґРёРЅ РїР°СЂР°РјРµС‚СЂ РїРѕРёСЃРєР°.\n\n"
+            "РџРѕР¶Р°Р»СѓР№СЃС‚Р°, РІС‹Р±РµСЂРёС‚Рµ С…РѕС‚СЏ Р±С‹ РѕРґРёРЅ РёР· С„РёР»СЊС‚СЂРѕРІ "
+            "(С‚РёРї Р¶РёР»СЊСЏ, РєРѕР»РёС‡РµСЃС‚РІРѕ РіРѕСЃС‚РµР№ РёР»Рё СЂР°СЃСЃС‚РѕСЏРЅРёРµ РґРѕ РјРѕСЂСЏ), "
+            "С‡С‚РѕР±С‹ СЏ РјРѕРі РЅР°Р№С‚Рё РґР»СЏ РІР°СЃ РїРѕРґС…РѕРґСЏС‰РёРµ РІР°СЂРёР°РЅС‚С‹!",
             reply_markup=InlineKeyboardMarkup([[
-                InlineKeyboardButton("🔍 Новый поиск", callback_data='new_search')
+                InlineKeyboardButton("рџ”Ќ РќРѕРІС‹Р№ РїРѕРёСЃРє", callback_data='new_search')
             ]])
         )
-        # Очищаем фильтры
+        # РћС‡РёС‰Р°РµРј С„РёР»СЊС‚СЂС‹
         if user_id in user_filters:
             del user_filters[user_id]
         return
     
-    # Показываем результаты
-    await query.edit_message_text("🔍 Ищу подходящие варианты...")
+    # РџРѕРєР°Р·С‹РІР°РµРј СЂРµР·СѓР»СЊС‚Р°С‚С‹
+    await query.edit_message_text("рџ”Ќ РС‰Сѓ РїРѕРґС…РѕРґСЏС‰РёРµ РІР°СЂРёР°РЅС‚С‹...")
     
-    # Получаем объявления из таблицы
+    # РџРѕР»СѓС‡Р°РµРј РѕР±СЉСЏРІР»РµРЅРёСЏ РёР· С‚Р°Р±Р»РёС†С‹
     all_apartments = sheets.read_apartments()
     
-    # Фильтруем
+    # Р¤РёР»СЊС‚СЂСѓРµРј
     filtered = sheets.filter_apartments(all_apartments, user_filters[user_id])
     
-    # Логируем поиск
+    # Р›РѕРіРёСЂСѓРµРј РїРѕРёСЃРє
     db.log_search(user_id, user_filters[user_id], len(filtered))
     
     if not filtered:
         await context.bot.send_message(
             chat_id=user_id,
-            text="😔 К сожалению, по твоим критериям ничего не найдено.\n\n"
-                 "Попробуй изменить параметры поиска:",
+            text="рџ” Рљ СЃРѕР¶Р°Р»РµРЅРёСЋ, РїРѕ С‚РІРѕРёРј РєСЂРёС‚РµСЂРёСЏРј РЅРёС‡РµРіРѕ РЅРµ РЅР°Р№РґРµРЅРѕ.\n\n"
+                 "РџРѕРїСЂРѕР±СѓР№ РёР·РјРµРЅРёС‚СЊ РїР°СЂР°РјРµС‚СЂС‹ РїРѕРёСЃРєР°:",
             reply_markup=InlineKeyboardMarkup([[
-                InlineKeyboardButton("🔍 Новый поиск", callback_data='new_search')
+                InlineKeyboardButton("рџ”Ќ РќРѕРІС‹Р№ РїРѕРёСЃРє", callback_data='new_search')
             ]])
         )
-        # Очищаем фильтры
+        # РћС‡РёС‰Р°РµРј С„РёР»СЊС‚СЂС‹
         if user_id in user_filters:
             del user_filters[user_id]
         return
     
-    # Проверяем подписку
+    # РџСЂРѕРІРµСЂСЏРµРј РїРѕРґРїРёСЃРєСѓ
     has_subscription, end_date = db.check_subscription(user_id)
     
     if has_subscription:
-        # Если есть подписка - показываем результаты
+        # Р•СЃР»Рё РµСЃС‚СЊ РїРѕРґРїРёСЃРєР° - РїРѕРєР°Р·С‹РІР°РµРј СЂРµР·СѓР»СЊС‚Р°С‚С‹
         await show_results_function(context, user_id, filtered)
         
-        # Очищаем фильтры
+        # РћС‡РёС‰Р°РµРј С„РёР»СЊС‚СЂС‹
         if user_id in user_filters:
             del user_filters[user_id]
     else:
-        # Если нет подписки - показываем количество и предлагаем оплатить
-        # Сохраняем результаты для показа после оплаты
+        # Р•СЃР»Рё РЅРµС‚ РїРѕРґРїРёСЃРєРё - РїРѕРєР°Р·С‹РІР°РµРј РєРѕР»РёС‡РµСЃС‚РІРѕ Рё РїСЂРµРґР»Р°РіР°РµРј РѕРїР»Р°С‚РёС‚СЊ
+        # РЎРѕС…СЂР°РЅСЏРµРј СЂРµР·СѓР»СЊС‚Р°С‚С‹ РґР»СЏ РїРѕРєР°Р·Р° РїРѕСЃР»Рµ РѕРїР»Р°С‚С‹
         user_search_results[user_id] = filtered
 
-        # Бесплатный превью (без контактов и VK)
+        # Р‘РµСЃРїР»Р°С‚РЅС‹Р№ РїСЂРµРІСЊСЋ (Р±РµР· РєРѕРЅС‚Р°РєС‚РѕРІ Рё VK)
         await show_preview_results_function(context, user_id, filtered)
         
         keyboard = [
-            [InlineKeyboardButton(f"💳 {TARIFFS['1_day']['name']} - {TARIFFS['1_day']['price']}₽",
+            [InlineKeyboardButton(f"рџ’і {TARIFFS['1_day']['name']} - {TARIFFS['1_day']['price']}в‚Ѕ",
                                  callback_data='buy_1_day')],
-            [InlineKeyboardButton(f"💳 {TARIFFS['7_days']['name']} - {TARIFFS['7_days']['price']}₽",
+            [InlineKeyboardButton(f"рџ’і {TARIFFS['7_days']['name']} - {TARIFFS['7_days']['price']}в‚Ѕ",
                                  callback_data='buy_7_days')],
-            [InlineKeyboardButton(f"💳 {TARIFFS['30_days']['name']} - {TARIFFS['30_days']['price']}₽",
+            [InlineKeyboardButton(f"рџ’і {TARIFFS['30_days']['name']} - {TARIFFS['30_days']['price']}в‚Ѕ",
                                  callback_data='buy_30_days')],
-            [InlineKeyboardButton("🔍 Новый поиск", callback_data='new_search')]
+            [InlineKeyboardButton("рџ”Ќ РќРѕРІС‹Р№ РїРѕРёСЃРє", callback_data='new_search')]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
 
         await context.bot.send_message(
             chat_id=user_id,
-            text=f"✅ Найдено вариантов: {len(filtered)}\n\n"
-                 f"Полный доступ к контактам и всем объявлениям открывается по подписке.\n\n"
-                 f"Выбери тариф:",
+            text=f"вњ… РќР°Р№РґРµРЅРѕ РІР°СЂРёР°РЅС‚РѕРІ: {len(filtered)}\n\n"
+                 f"РџРѕР»РЅС‹Р№ РґРѕСЃС‚СѓРї Рє РєРѕРЅС‚Р°РєС‚Р°Рј Рё РІСЃРµРј РѕР±СЉСЏРІР»РµРЅРёСЏРј РѕС‚РєСЂС‹РІР°РµС‚СЃСЏ РїРѕ РїРѕРґРїРёСЃРєРµ.\n\n"
+                 f"Р’С‹Р±РµСЂРё С‚Р°СЂРёС„:",
             reply_markup=reply_markup
         )
 
-        # НЕ очищаем фильтры - они могут пригодиться
+        # РќР• РѕС‡РёС‰Р°РµРј С„РёР»СЊС‚СЂС‹ - РѕРЅРё РјРѕРіСѓС‚ РїСЂРёРіРѕРґРёС‚СЊСЃСЏ
 
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Отмена поиска"""
+    """РћС‚РјРµРЅР° РїРѕРёСЃРєР°"""
     user_id = update.effective_user.id
     if user_id in user_filters:
         del user_filters[user_id]
     
     await update.message.reply_text(
-        "❌ Поиск отменен.\n\n"
-        "Для нового поиска используй /search"
+        "вќЊ РџРѕРёСЃРє РѕС‚РјРµРЅРµРЅ.\n\n"
+        "Р”Р»СЏ РЅРѕРІРѕРіРѕ РїРѕРёСЃРєР° РёСЃРїРѕР»СЊР·СѓР№ /search"
     )
     
 
 
-# === АДМИНСКИЕ КОМАНДЫ ===
+# === РђР”РњРРќРЎРљРР• РљРћРњРђРќР”Р« ===
 
 async def admin_activate_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработчик кнопки активации подписки админом"""
+    """РћР±СЂР°Р±РѕС‚С‡РёРє РєРЅРѕРїРєРё Р°РєС‚РёРІР°С†РёРё РїРѕРґРїРёСЃРєРё Р°РґРјРёРЅРѕРј"""
     query = update.callback_query
     
-    # Проверка что это админ
+    # РџСЂРѕРІРµСЂРєР° С‡С‚Рѕ СЌС‚Рѕ Р°РґРјРёРЅ
     if query.from_user.id != ADMIN_ID:
-        await query.answer("⛔ Только для администратора", show_alert=True)
+        await safe_answer_callback(query, "в›” РўРѕР»СЊРєРѕ РґР»СЏ Р°РґРјРёРЅРёСЃС‚СЂР°С‚РѕСЂР°", show_alert=True)
         return
     
-    await query.answer()
+    await safe_answer_callback(query)
     
-    # Безопасный парсинг данных: admin_activate_USER_ID_DAYS
+    # Р‘РµР·РѕРїР°СЃРЅС‹Р№ РїР°СЂСЃРёРЅРі РґР°РЅРЅС‹С…: admin_activate_USER_ID_DAYS
     try:
         parts = query.data.replace('admin_activate_', '').split('_')
         user_id = int(parts[0])
         days = int(parts[1])
     except (IndexError, ValueError) as e:
-        logger.error(f"Ошибка парсинга admin callback_data: {query.data}, {e}")
-        await query.answer("❌ Некорректные данные", show_alert=True)
+        logger.error(f"РћС€РёР±РєР° РїР°СЂСЃРёРЅРіР° admin callback_data: {query.data}, {e}")
+        await safe_answer_callback(query, "вќЊ РќРµРєРѕСЂСЂРµРєС‚РЅС‹Рµ РґР°РЅРЅС‹Рµ", show_alert=True)
         return
     
     try:
-        # Активируем подписку
+        # РђРєС‚РёРІРёСЂСѓРµРј РїРѕРґРїРёСЃРєСѓ
         end_date = db.add_subscription(user_id, days, f"{days}_days")
         
-        # Отменяем запланированное напоминание если оно есть
-        # Ищем все задачи и отменяем те, которые относятся к этому пользователю
+        # РћС‚РјРµРЅСЏРµРј Р·Р°РїР»Р°РЅРёСЂРѕРІР°РЅРЅРѕРµ РЅР°РїРѕРјРёРЅР°РЅРёРµ РµСЃР»Рё РѕРЅРѕ РµСЃС‚СЊ
+        # РС‰РµРј РІСЃРµ Р·Р°РґР°С‡Рё Рё РѕС‚РјРµРЅСЏРµРј С‚Рµ, РєРѕС‚РѕСЂС‹Рµ РѕС‚РЅРѕСЃСЏС‚СЃСЏ Рє СЌС‚РѕРјСѓ РїРѕР»СЊР·РѕРІР°С‚РµР»СЋ
         all_jobs = context.job_queue.jobs()
         for job in all_jobs:
             if job.name and job.name.startswith(f'reminder_{user_id}_'):
                 job.schedule_removal()
         
-        # Обновляем сообщение админу
+        # РћР±РЅРѕРІР»СЏРµРј СЃРѕРѕР±С‰РµРЅРёРµ Р°РґРјРёРЅСѓ
         await query.edit_message_text(
-            f"✅ Подписка активирована!\n\n"
+            f"вњ… РџРѕРґРїРёСЃРєР° Р°РєС‚РёРІРёСЂРѕРІР°РЅР°!\n\n"
             f"User ID: {user_id}\n"
-            f"Дней: {days}\n"
-            f"До: {end_date.strftime('%d.%m.%Y %H:%M')}"
+            f"Р”РЅРµР№: {days}\n"
+            f"Р”Рѕ: {end_date.strftime('%d.%m.%Y %H:%M')}"
         )
         
-        # Уведомляем пользователя
+        # РЈРІРµРґРѕРјР»СЏРµРј РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ
         try:
-            tariff_name = f"{days} " + ("день" if days == 1 else "дней")
+            tariff_name = f"{days} " + ("РґРµРЅСЊ" if days == 1 else "РґРЅРµР№")
             await context.bot.send_message(
                 chat_id=user_id,
-                text=f"🎉 Подписка активирована!\n\n"
-                     f"Тариф: {tariff_name}\n"
-                     f"Активна до: {end_date.strftime('%d.%m.%Y %H:%M')}"
+                text=f"рџЋ‰ РџРѕРґРїРёСЃРєР° Р°РєС‚РёРІРёСЂРѕРІР°РЅР°!\n\n"
+                     f"РўР°СЂРёС„: {tariff_name}\n"
+                     f"РђРєС‚РёРІРЅР° РґРѕ: {end_date.strftime('%d.%m.%Y %H:%M')}"
             )
             
-            # Проверяем есть ли сохраненные результаты поиска
+            # РџСЂРѕРІРµСЂСЏРµРј РµСЃС‚СЊ Р»Рё СЃРѕС…СЂР°РЅРµРЅРЅС‹Рµ СЂРµР·СѓР»СЊС‚Р°С‚С‹ РїРѕРёСЃРєР°
             if user_id in user_search_results:
-                # Есть сохраненные результаты - показываем их
+                # Р•СЃС‚СЊ СЃРѕС…СЂР°РЅРµРЅРЅС‹Рµ СЂРµР·СѓР»СЊС‚Р°С‚С‹ - РїРѕРєР°Р·С‹РІР°РµРј РёС…
                 filtered = user_search_results[user_id]
                 
                 await context.bot.send_message(
                     chat_id=user_id,
-                    text=f"🔍 Вот результаты твоего поиска ({len(filtered)} вариантов):"
+                    text=f"рџ”Ќ Р’РѕС‚ СЂРµР·СѓР»СЊС‚Р°С‚С‹ С‚РІРѕРµРіРѕ РїРѕРёСЃРєР° ({len(filtered)} РІР°СЂРёР°РЅС‚РѕРІ):"
                 )
                 
                 await show_results_function(context, user_id, filtered)
                 
-                # Очищаем сохраненные результаты
+                # РћС‡РёС‰Р°РµРј СЃРѕС…СЂР°РЅРµРЅРЅС‹Рµ СЂРµР·СѓР»СЊС‚Р°С‚С‹
                 del user_search_results[user_id]
                 
-                # Очищаем фильтры
+                # РћС‡РёС‰Р°РµРј С„РёР»СЊС‚СЂС‹
                 if user_id in user_filters:
                     del user_filters[user_id]
             else:
-                # Нет сохраненных результатов - начинаем новый поиск
-                # Инициализируем фильтры
+                # РќРµС‚ СЃРѕС…СЂР°РЅРµРЅРЅС‹С… СЂРµР·СѓР»СЊС‚Р°С‚РѕРІ - РЅР°С‡РёРЅР°РµРј РЅРѕРІС‹Р№ РїРѕРёСЃРє
+                # РРЅРёС†РёР°Р»РёР·РёСЂСѓРµРј С„РёР»СЊС‚СЂС‹
                 user_filters[user_id] = {}
                 
-                # Запускаем поиск автоматически
+                # Р—Р°РїСѓСЃРєР°РµРј РїРѕРёСЃРє Р°РІС‚РѕРјР°С‚РёС‡РµСЃРєРё
                 keyboard = [
-                    [InlineKeyboardButton("🏖️ Ейск", callback_data='location_ейск')],
-                    [InlineKeyboardButton("🌊 Должанская", callback_data='location_должанская')]
+                    [InlineKeyboardButton("рџЏ–пёЏ Р•Р№СЃРє", callback_data='location_РµР№СЃРє')],
+                    [InlineKeyboardButton("рџЊЉ Р”РѕР»Р¶Р°РЅСЃРєР°СЏ", callback_data='location_РґРѕР»Р¶Р°РЅСЃРєР°СЏ')]
                 ]
                 reply_markup = InlineKeyboardMarkup(keyboard)
                 
                 await context.bot.send_message(
                     chat_id=user_id,
-                    text="🔍 Давай найдем жилье для тебя!\n\n1️⃣ Выбери населённый пункт:",
+                    text="рџ”Ќ Р”Р°РІР°Р№ РЅР°Р№РґРµРј Р¶РёР»СЊРµ РґР»СЏ С‚РµР±СЏ!\n\n1пёЏвѓЈ Р’С‹Р±РµСЂРё РЅР°СЃРµР»С‘РЅРЅС‹Р№ РїСѓРЅРєС‚:",
                     reply_markup=reply_markup
                 )
         except Exception as e:
-            logger.error(f"Ошибка при уведомлении пользователя об активации: {e}")
+            logger.error(f"РћС€РёР±РєР° РїСЂРё СѓРІРµРґРѕРјР»РµРЅРёРё РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ РѕР± Р°РєС‚РёРІР°С†РёРё: {e}")
             
     except Exception as e:
         await query.edit_message_text(
-            f"❌ Ошибка при активации: {e}"
+            f"вќЊ РћС€РёР±РєР° РїСЂРё Р°РєС‚РёРІР°С†РёРё: {e}"
         )
 
 
 async def activate_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Активация подписки пользователю (только для админа)"""
+    """РђРєС‚РёРІР°С†РёСЏ РїРѕРґРїРёСЃРєРё РїРѕР»СЊР·РѕРІР°С‚РµР»СЋ (С‚РѕР»СЊРєРѕ РґР»СЏ Р°РґРјРёРЅР°)"""
     if update.effective_user.id != ADMIN_ID:
         return
     
@@ -1211,58 +1224,58 @@ async def activate_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         end_date = db.add_subscription(user_id, days, f"{days}_days")
         
-        # Отменяем запланированное напоминание если оно есть
+        # РћС‚РјРµРЅСЏРµРј Р·Р°РїР»Р°РЅРёСЂРѕРІР°РЅРЅРѕРµ РЅР°РїРѕРјРёРЅР°РЅРёРµ РµСЃР»Рё РѕРЅРѕ РµСЃС‚СЊ
         all_jobs = context.job_queue.jobs()
         for job in all_jobs:
             if job.name and job.name.startswith(f'reminder_{user_id}_'):
                 job.schedule_removal()
         
         await update.message.reply_text(
-            f"✅ Подписка активирована!\n\n"
+            f"вњ… РџРѕРґРїРёСЃРєР° Р°РєС‚РёРІРёСЂРѕРІР°РЅР°!\n\n"
             f"User ID: {user_id}\n"
-            f"Дней: {days}\n"
-            f"До: {end_date.strftime('%d.%m.%Y %H:%M')}"
+            f"Р”РЅРµР№: {days}\n"
+            f"Р”Рѕ: {end_date.strftime('%d.%m.%Y %H:%M')}"
         )
         
-        # Уведомляем пользователя и сразу запускаем поиск
+        # РЈРІРµРґРѕРјР»СЏРµРј РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ Рё СЃСЂР°Р·Сѓ Р·Р°РїСѓСЃРєР°РµРј РїРѕРёСЃРє
         try:
-            tariff_name = f"{days} " + ("день" if days == 1 else "дней")
+            tariff_name = f"{days} " + ("РґРµРЅСЊ" if days == 1 else "РґРЅРµР№")
             await context.bot.send_message(
                 chat_id=user_id,
-                text=f"🎉 Подписка активирована!\n\n"
-                     f"Тариф: {tariff_name}\n"
-                     f"Активна до: {end_date.strftime('%d.%m.%Y %H:%M')}\n\n"
-                     f"🔍 Давай найдем жилье для тебя!"
+                text=f"рџЋ‰ РџРѕРґРїРёСЃРєР° Р°РєС‚РёРІРёСЂРѕРІР°РЅР°!\n\n"
+                     f"РўР°СЂРёС„: {tariff_name}\n"
+                     f"РђРєС‚РёРІРЅР° РґРѕ: {end_date.strftime('%d.%m.%Y %H:%M')}\n\n"
+                     f"рџ”Ќ Р”Р°РІР°Р№ РЅР°Р№РґРµРј Р¶РёР»СЊРµ РґР»СЏ С‚РµР±СЏ!"
             )
             
-            # Инициализируем фильтры
+            # РРЅРёС†РёР°Р»РёР·РёСЂСѓРµРј С„РёР»СЊС‚СЂС‹
             user_filters[user_id] = {}
             
-            # Запускаем поиск автоматически - ПЕРВЫЙ ВОПРОС о населённом пункте
+            # Р—Р°РїСѓСЃРєР°РµРј РїРѕРёСЃРє Р°РІС‚РѕРјР°С‚РёС‡РµСЃРєРё - РџР•Р Р’Р«Р™ Р’РћРџР РћРЎ Рѕ РЅР°СЃРµР»С‘РЅРЅРѕРј РїСѓРЅРєС‚Рµ
             keyboard = [
-                [InlineKeyboardButton("🏖️ Ейск", callback_data='location_ейск')],
-                [InlineKeyboardButton("🌊 Должанская", callback_data='location_должанская')]
+                [InlineKeyboardButton("рџЏ–пёЏ Р•Р№СЃРє", callback_data='location_РµР№СЃРє')],
+                [InlineKeyboardButton("рџЊЉ Р”РѕР»Р¶Р°РЅСЃРєР°СЏ", callback_data='location_РґРѕР»Р¶Р°РЅСЃРєР°СЏ')]
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
             
             await context.bot.send_message(
                 chat_id=user_id,
-                text="1️⃣ Выбери населённый пункт:",
+                text="1пёЏвѓЈ Р’С‹Р±РµСЂРё РЅР°СЃРµР»С‘РЅРЅС‹Р№ РїСѓРЅРєС‚:",
                 reply_markup=reply_markup
             )
         except Exception as e:
-            logger.error(f"Ошибка при уведомлении пользователя об активации: {e}")
+            logger.error(f"РћС€РёР±РєР° РїСЂРё СѓРІРµРґРѕРјР»РµРЅРёРё РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ РѕР± Р°РєС‚РёРІР°С†РёРё: {e}")
             
     except (IndexError, ValueError):
         await update.message.reply_text(
-            "❌ Неверный формат команды\n\n"
-            "Используй: /activate <user_id> <дни>\n"
-            "Пример: /activate 123456789 7"
+            "вќЊ РќРµРІРµСЂРЅС‹Р№ С„РѕСЂРјР°С‚ РєРѕРјР°РЅРґС‹\n\n"
+            "РСЃРїРѕР»СЊР·СѓР№: /activate <user_id> <РґРЅРё>\n"
+            "РџСЂРёРјРµСЂ: /activate 123456789 7"
         )
 
 
 async def check_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Проверка статуса пользователя (только для админа)"""
+    """РџСЂРѕРІРµСЂРєР° СЃС‚Р°С‚СѓСЃР° РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ (С‚РѕР»СЊРєРѕ РґР»СЏ Р°РґРјРёРЅР°)"""
     if update.effective_user.id != ADMIN_ID:
         return
     
@@ -1272,74 +1285,74 @@ async def check_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         if has_sub:
             await update.message.reply_text(
-                f"✅ Подписка активна\n\n"
+                f"вњ… РџРѕРґРїРёСЃРєР° Р°РєС‚РёРІРЅР°\n\n"
                 f"User ID: {user_id}\n"
-                f"До: {end_date.strftime('%d.%m.%Y %H:%M')}"
+                f"Р”Рѕ: {end_date.strftime('%d.%m.%Y %H:%M')}"
             )
         else:
             await update.message.reply_text(
-                f"❌ Подписка неактивна\n\n"
+                f"вќЊ РџРѕРґРїРёСЃРєР° РЅРµР°РєС‚РёРІРЅР°\n\n"
                 f"User ID: {user_id}"
             )
     except (IndexError, ValueError):
         await update.message.reply_text(
-            "❌ Неверный формат\n\n"
-            "Используй: /check <user_id>"
+            "вќЊ РќРµРІРµСЂРЅС‹Р№ С„РѕСЂРјР°С‚\n\n"
+            "РСЃРїРѕР»СЊР·СѓР№: /check <user_id>"
         )
 
 
 async def show_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Показ статистики (только для админа)"""
+    """РџРѕРєР°Р· СЃС‚Р°С‚РёСЃС‚РёРєРё (С‚РѕР»СЊРєРѕ РґР»СЏ Р°РґРјРёРЅР°)"""
     if update.effective_user.id != ADMIN_ID:
         return
     
     stats = db.get_stats()
     
-    text = "📊 Статистика бота\n\n"
-    text += f"👥 Всего пользователей: {stats['total_users']}\n"
-    text += f"✅ Активных подписок: {stats['active_subscriptions']}\n"
-    text += f"⏳ Ожидают оплаты: {stats['pending_payments']}\n"
-    text += f"🔍 Поисков сегодня: {stats['searches_today']}\n"
+    text = "рџ“Љ РЎС‚Р°С‚РёСЃС‚РёРєР° Р±РѕС‚Р°\n\n"
+    text += f"рџ‘Ґ Р’СЃРµРіРѕ РїРѕР»СЊР·РѕРІР°С‚РµР»РµР№: {stats['total_users']}\n"
+    text += f"вњ… РђРєС‚РёРІРЅС‹С… РїРѕРґРїРёСЃРѕРє: {stats['active_subscriptions']}\n"
+    text += f"вЏі РћР¶РёРґР°СЋС‚ РѕРїР»Р°С‚С‹: {stats['pending_payments']}\n"
+    text += f"рџ”Ќ РџРѕРёСЃРєРѕРІ СЃРµРіРѕРґРЅСЏ: {stats['searches_today']}\n"
     
     await update.message.reply_text(text)
 
 
 async def show_pending(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Показ ожидающих оплат (только для админа)"""
+    """РџРѕРєР°Р· РѕР¶РёРґР°СЋС‰РёС… РѕРїР»Р°С‚ (С‚РѕР»СЊРєРѕ РґР»СЏ Р°РґРјРёРЅР°)"""
     if update.effective_user.id != ADMIN_ID:
         return
     
     pending = db.get_pending_payments()
     
     if not pending:
-        await update.message.reply_text("✅ Нет ожидающих оплат")
+        await update.message.reply_text("вњ… РќРµС‚ РѕР¶РёРґР°СЋС‰РёС… РѕРїР»Р°С‚")
         return
     
-    text = "⏳ Ожидающие оплаты:\n\n"
+    text = "вЏі РћР¶РёРґР°СЋС‰РёРµ РѕРїР»Р°С‚С‹:\n\n"
     for req_id, user_id, username, first_name, tariff, created_at in pending:
         text += f"ID: {req_id}\n"
-        text += f"User: @{username or 'нет'} ({first_name})\n"
+        text += f"User: @{username or 'РЅРµС‚'} ({first_name})\n"
         text += f"User ID: {user_id}\n"
-        text += f"Тариф: {tariff}\n"
-        text += f"Создано: {created_at}\n"
-        text += f"Активировать: /activate {user_id} {TARIFFS[tariff]['days']}\n\n"
+        text += f"РўР°СЂРёС„: {tariff}\n"
+        text += f"РЎРѕР·РґР°РЅРѕ: {created_at}\n"
+        text += f"РђРєС‚РёРІРёСЂРѕРІР°С‚СЊ: /activate {user_id} {TARIFFS[tariff]['days']}\n\n"
     
     await update.message.reply_text(text)
 
 
 async def show_more_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработчик кнопки 'Показать еще'"""
+    """РћР±СЂР°Р±РѕС‚С‡РёРє РєРЅРѕРїРєРё 'РџРѕРєР°Р·Р°С‚СЊ РµС‰Рµ'"""
     query = update.callback_query
-    await query.answer()
+    await safe_answer_callback(query)
     
     user_id = query.from_user.id
     
-    # Получаем сохраненные данные
+    # РџРѕР»СѓС‡Р°РµРј СЃРѕС…СЂР°РЅРµРЅРЅС‹Рµ РґР°РЅРЅС‹Рµ
     if user_id not in user_pagination_data:
         await query.edit_message_text(
-            "⚠️ Данные поиска устарели. Начните новый поиск:",
+            "вљ пёЏ Р”Р°РЅРЅС‹Рµ РїРѕРёСЃРєР° СѓСЃС‚Р°СЂРµР»Рё. РќР°С‡РЅРёС‚Рµ РЅРѕРІС‹Р№ РїРѕРёСЃРє:",
             reply_markup=InlineKeyboardMarkup([[
-                InlineKeyboardButton("🔍 Новый поиск", callback_data='new_search')
+                InlineKeyboardButton("рџ”Ќ РќРѕРІС‹Р№ РїРѕРёСЃРє", callback_data='new_search')
             ]])
         )
         return
@@ -1348,12 +1361,12 @@ async def show_more_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     filtered = data['filtered']
     next_index = data['next_index']
     
-    await query.edit_message_text("🔍 Загружаю еще варианты...")
+    await query.edit_message_text("рџ”Ќ Р—Р°РіСЂСѓР¶Р°СЋ РµС‰Рµ РІР°СЂРёР°РЅС‚С‹...")
     
-    # Показываем следующую порцию
+    # РџРѕРєР°Р·С‹РІР°РµРј СЃР»РµРґСѓСЋС‰СѓСЋ РїРѕСЂС†РёСЋ
     await show_results_function(context, user_id, filtered, start_index=next_index)
     
-    # Очищаем данные пагинации если все показано
+    # РћС‡РёС‰Р°РµРј РґР°РЅРЅС‹Рµ РїР°РіРёРЅР°С†РёРё РµСЃР»Рё РІСЃРµ РїРѕРєР°Р·Р°РЅРѕ
     remaining = len(filtered) - next_index - RESULTS_PER_PAGE
     if remaining <= 0:
         if user_id in user_pagination_data:
@@ -1361,90 +1374,90 @@ async def show_more_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def go_start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработчик кнопки 'В начало'"""
+    """РћР±СЂР°Р±РѕС‚С‡РёРє РєРЅРѕРїРєРё 'Р’ РЅР°С‡Р°Р»Рѕ'"""
     query = update.callback_query
-    await query.answer()
+    await safe_answer_callback(query)
     
     user_id = query.from_user.id
     user = query.from_user
     
-    # Проверяем подписку для информации
+    # РџСЂРѕРІРµСЂСЏРµРј РїРѕРґРїРёСЃРєСѓ РґР»СЏ РёРЅС„РѕСЂРјР°С†РёРё
     has_subscription, end_date = db.check_subscription(user_id)
     
-    # Приветствие
+    # РџСЂРёРІРµС‚СЃС‚РІРёРµ
     if has_subscription:
         await query.edit_message_text(
             f"{WELCOME_TEXT}\n\n"
-            f"✅ Подписка активна до {end_date.strftime('%d.%m.%Y %H:%M')}"
+            f"вњ… РџРѕРґРїРёСЃРєР° Р°РєС‚РёРІРЅР° РґРѕ {end_date.strftime('%d.%m.%Y %H:%M')}"
         )
     else:
         await query.edit_message_text(WELCOME_TEXT)
     
-    # Инициализируем фильтры для всех
+    # РРЅРёС†РёР°Р»РёР·РёСЂСѓРµРј С„РёР»СЊС‚СЂС‹ РґР»СЏ РІСЃРµС…
     user_filters[user_id] = {}
     
-    # Показываем выбор населённого пункта
+    # РџРѕРєР°Р·С‹РІР°РµРј РІС‹Р±РѕСЂ РЅР°СЃРµР»С‘РЅРЅРѕРіРѕ РїСѓРЅРєС‚Р°
     keyboard = [
-        [InlineKeyboardButton("🏖️ Ейск", callback_data='location_ейск')],
-        [InlineKeyboardButton("🌊 Должанская", callback_data='location_должанская')]
+        [InlineKeyboardButton("рџЏ–пёЏ Р•Р№СЃРє", callback_data='location_РµР№СЃРє')],
+        [InlineKeyboardButton("рџЊЉ Р”РѕР»Р¶Р°РЅСЃРєР°СЏ", callback_data='location_РґРѕР»Р¶Р°РЅСЃРєР°СЏ')]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     await context.bot.send_message(
         chat_id=user_id,
-        text="🔍 Давай найдем идеальное жилье!\n\n"
-             "1️⃣ Выбери населённый пункт:",
+        text="рџ”Ќ Р”Р°РІР°Р№ РЅР°Р№РґРµРј РёРґРµР°Р»СЊРЅРѕРµ Р¶РёР»СЊРµ!\n\n"
+             "1пёЏвѓЈ Р’С‹Р±РµСЂРё РЅР°СЃРµР»С‘РЅРЅС‹Р№ РїСѓРЅРєС‚:",
         reply_markup=reply_markup
     )
 
 
 async def new_search_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработчик кнопки 'Новый поиск'"""
+    """РћР±СЂР°Р±РѕС‚С‡РёРє РєРЅРѕРїРєРё 'РќРѕРІС‹Р№ РїРѕРёСЃРє'"""
     query = update.callback_query
-    await query.answer()
+    await safe_answer_callback(query)
     
     user_id = query.from_user.id
     
-    # Очищаем старые фильтры если есть
+    # РћС‡РёС‰Р°РµРј СЃС‚Р°СЂС‹Рµ С„РёР»СЊС‚СЂС‹ РµСЃР»Рё РµСЃС‚СЊ
     if user_id in user_filters:
         del user_filters[user_id]
     
-    # Инициализируем новые фильтры
+    # РРЅРёС†РёР°Р»РёР·РёСЂСѓРµРј РЅРѕРІС‹Рµ С„РёР»СЊС‚СЂС‹
     user_filters[user_id] = {}
     
-    # Показываем выбор населённого пункта
+    # РџРѕРєР°Р·С‹РІР°РµРј РІС‹Р±РѕСЂ РЅР°СЃРµР»С‘РЅРЅРѕРіРѕ РїСѓРЅРєС‚Р°
     keyboard = [
-        [InlineKeyboardButton("🏖️ Ейск", callback_data='location_ейск')],
-        [InlineKeyboardButton("🌊 Должанская", callback_data='location_должанская')]
+        [InlineKeyboardButton("рџЏ–пёЏ Р•Р№СЃРє", callback_data='location_РµР№СЃРє')],
+        [InlineKeyboardButton("рџЊЉ Р”РѕР»Р¶Р°РЅСЃРєР°СЏ", callback_data='location_РґРѕР»Р¶Р°РЅСЃРєР°СЏ')]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     await query.edit_message_text(
-        "🔍 Давай найдем идеальное жилье!\n\n"
-        "1️⃣ Выбери населённый пункт:",
+        "рџ”Ќ Р”Р°РІР°Р№ РЅР°Р№РґРµРј РёРґРµР°Р»СЊРЅРѕРµ Р¶РёР»СЊРµ!\n\n"
+        "1пёЏвѓЈ Р’С‹Р±РµСЂРё РЅР°СЃРµР»С‘РЅРЅС‹Р№ РїСѓРЅРєС‚:",
         reply_markup=reply_markup
     )
 
 
-# Константа для использования в show_more_handler
+# РљРѕРЅСЃС‚Р°РЅС‚Р° РґР»СЏ РёСЃРїРѕР»СЊР·РѕРІР°РЅРёСЏ РІ show_more_handler
 RESULTS_PER_PAGE = 20
 
 
 def main():
-    """Запуск бота"""
-    # Создаем приложение
+    """Р—Р°РїСѓСЃРє Р±РѕС‚Р°"""
+    # РЎРѕР·РґР°РµРј РїСЂРёР»РѕР¶РµРЅРёРµ
     application = Application.builder().token(BOT_TOKEN).build()
 
-    # Регистрируем обработчики
+    # Р РµРіРёСЃС‚СЂРёСЂСѓРµРј РѕР±СЂР°Р±РѕС‚С‡РёРєРё
     application.add_handler(CommandHandler('start', start))
     application.add_handler(CommandHandler('search', search_start))
     application.add_handler(CommandHandler('cancel', cancel))
 
-    # Обработчики оплаты Stars
+    # РћР±СЂР°Р±РѕС‚С‡РёРєРё РѕРїР»Р°С‚С‹ Stars
     application.add_handler(PreCheckoutQueryHandler(precheckout_callback))
     application.add_handler(MessageHandler(filters.SUCCESSFUL_PAYMENT, successful_payment_stars))
 
-    # Обработчики кнопок (callback queries)
+    # РћР±СЂР°Р±РѕС‚С‡РёРєРё РєРЅРѕРїРѕРє (callback queries)
     application.add_handler(CallbackQueryHandler(buy_subscription, pattern='^buy_'))
     application.add_handler(CallbackQueryHandler(pay_with_card, pattern='^pay_card_'))
     application.add_handler(CallbackQueryHandler(pay_with_stars, pattern='^pay_stars_'))
@@ -1461,13 +1474,13 @@ def main():
     application.add_handler(CallbackQueryHandler(show_more_handler, pattern='^show_more$'))
     application.add_handler(CallbackQueryHandler(subscribe_alerts_handler, pattern='^alerts_subscribe$'))
 
-    # Админские команды
+    # РђРґРјРёРЅСЃРєРёРµ РєРѕРјР°РЅРґС‹
     application.add_handler(CommandHandler('activate', activate_user))
     application.add_handler(CommandHandler('check', check_user))
     application.add_handler(CommandHandler('stats', show_stats))
     application.add_handler(CommandHandler('pending', show_pending))
 
-    # Фоновая проверка новых объявлений для подписчиков уведомлений
+    # Р¤РѕРЅРѕРІР°СЏ РїСЂРѕРІРµСЂРєР° РЅРѕРІС‹С… РѕР±СЉСЏРІР»РµРЅРёР№ РґР»СЏ РїРѕРґРїРёСЃС‡РёРєРѕРІ СѓРІРµРґРѕРјР»РµРЅРёР№
     if application.job_queue:
         application.job_queue.run_repeating(
             check_new_apartments_job,
@@ -1477,14 +1490,15 @@ def main():
         )
     else:
         logger.warning(
-            "JobQueue недоступен. Установите зависимости: "
+            "JobQueue РЅРµРґРѕСЃС‚СѓРїРµРЅ. РЈСЃС‚Р°РЅРѕРІРёС‚Рµ Р·Р°РІРёСЃРёРјРѕСЃС‚Рё: "
             "pip install \"python-telegram-bot[job-queue]==21.7\""
         )
 
-    # Запускаем бота
-    logger.info("Бот запущен!")
+    # Р—Р°РїСѓСЃРєР°РµРј Р±РѕС‚Р°
+    logger.info("Р‘РѕС‚ Р·Р°РїСѓС‰РµРЅ!")
     application.run_polling(allowed_updates=Update.ALL_TYPES)
 
 
 if __name__ == '__main__':
     main()
+
