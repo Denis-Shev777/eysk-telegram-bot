@@ -1468,12 +1468,18 @@ def main():
     application.add_handler(CommandHandler('pending', show_pending))
 
     # Фоновая проверка новых объявлений для подписчиков уведомлений
-    application.job_queue.run_repeating(
-        check_new_apartments_job,
-        interval=NOTIFICATION_CHECK_INTERVAL_SECONDS,
-        first=30,
-        name='new_apartments_checker'
-    )
+    if application.job_queue:
+        application.job_queue.run_repeating(
+            check_new_apartments_job,
+            interval=NOTIFICATION_CHECK_INTERVAL_SECONDS,
+            first=30,
+            name='new_apartments_checker'
+        )
+    else:
+        logger.warning(
+            "JobQueue недоступен. Установите зависимости: "
+            "pip install \"python-telegram-bot[job-queue]==21.7\""
+        )
 
     # Запускаем бота
     logger.info("Бот запущен!")
