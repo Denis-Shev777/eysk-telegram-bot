@@ -96,6 +96,26 @@ class Database:
                 CREATE INDEX IF NOT EXISTS idx_search_logs_created_at 
                 ON search_logs(created_at)
             ''')
+
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS alert_subscriptions (
+                    user_id INTEGER PRIMARY KEY,
+                    active INTEGER DEFAULT 1,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (user_id) REFERENCES users(user_id)
+                )
+            ''')
+
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS seen_apartments (
+                    user_id INTEGER,
+                    apartment_key TEXT,
+                    seen_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (user_id, apartment_key),
+                    FOREIGN KEY (user_id) REFERENCES users(user_id)
+                )
+            ''')
             
             conn.commit()
     
@@ -252,3 +272,48 @@ class Database:
                 VALUES (?, ?, ?)
             ''', (user_id, str(filters), results_count))
             conn.commit()
+
+    def set_alert_subscription(self, user_id, active=True):
+        """Включает/выключает подписку на уведомления о новых объявлениях"""
+        with sqlite3.connect(self.db_file) as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                INSERT INTO alert_subscriptions (user_id, active, updated_at)
+                VALUES (?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(user_id) DO UPDATE SET
+                    active=excluded.active,
+                    updated_at=CURRENT_TIMESTAMP
+            ''', (user_id, 1 if active else 0))
+            conn.commit()
+
+    def get_alert_subscribers(self):
+        """Возвращает user_id пользователей с активными уведомлениями"""
+        with sqlite3.connect(self.db_file) as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT user_id FROM alert_subscriptions
+                WHERE active = 1
+            ''')
+            return [row[0] for row in cursor.fetchall()]
+
+    def add_seen_apartments(self, user_id, apartment_keys):
+        """Сохраняет список объявлений как уже просмотренные"""
+        if not apartment_keys:
+            return
+        with sqlite3.connect(self.db_file) as conn:
+            cursor = conn.cursor()
+            cursor.executemany('''
+                INSERT OR IGNORE INTO seen_apartments (user_id, apartment_key)
+                VALUES (?, ?)
+            ''', [(user_id, key) for key in apartment_keys])
+            conn.commit()
+
+    def get_seen_apartment_keys(self, user_id):
+        """Возвращает множество ключей объявлений, уже показанных пользователю"""
+        with sqlite3.connect(self.db_file) as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT apartment_key FROM seen_apartments
+                WHERE user_id = ?
+            ''', (user_id,))
+            return {row[0] for row in cursor.fetchall()}

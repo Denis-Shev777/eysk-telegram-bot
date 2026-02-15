@@ -6,6 +6,8 @@ Eysk Telegram Bot - Version 2.0 with Stars and USDT payments
 
 import logging
 from datetime import datetime
+import hashlib
+import random
 import pytz
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, LabeledPrice, CopyTextButton
 from telegram.ext import (
@@ -36,6 +38,41 @@ user_pagination_data = {}
 
 # Временное хранилище результатов поиска (для пользователей без подписки)
 user_search_results = {}
+
+# Константы превью/уведомлений
+PREVIEW_RESULTS_LIMIT = 2
+NOTIFICATION_CHECK_INTERVAL_SECONDS = 900
+NOTIFICATION_NEW_ITEMS_LIMIT = 3
+
+
+def build_apartment_key(apartment: dict) -> str:
+    """Строит стабильный ключ объявления для учета просмотров/уведомлений."""
+    key_parts = [
+        apartment.get('Населенный_пункт', '').strip(),
+        apartment.get('Тип_жилья', '').strip(),
+        apartment.get('Расстояние_от_моря_м', '').strip(),
+        apartment.get('Гостей_макс', '').strip(),
+        apartment.get('Цена_за_сутки', '').strip(),
+        apartment.get('Телефон', '').strip(),
+        apartment.get('Имя_хозяина', '').strip(),
+        apartment.get('VK_ссылка', '').strip(),
+        apartment.get('Фото_URL', '').strip(),
+    ]
+    raw = "|".join(key_parts)
+    return hashlib.sha256(raw.encode('utf-8')).hexdigest()
+
+
+def get_fake_views_count(apartment_key: str) -> int:
+    """Псевдо-рандомный, но стабильный счетчик просмотров для объявления."""
+    rng = random.Random(apartment_key)
+    return rng.randint(8, 39)
+
+
+async def seed_seen_apartments_for_user(user_id: int):
+    """Заполняет базу текущими объявлениями, чтобы уведомлять только о новых."""
+    all_apartments = sheets.read_apartments()
+    all_keys = [build_apartment_key(apt) for apt in all_apartments]
+    db.add_seen_apartments(user_id, all_keys)
 
 
 def is_payment_time():
@@ -513,7 +550,14 @@ async def search_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
-async def show_results_function(context, user_id, filtered, start_index=0):
+async def show_results_function(
+    context,
+    user_id,
+    filtered,
+    start_index=0,
+    show_contacts=True,
+    show_vk=True
+):
     """Вспомогательная функция для показа результатов с пагинацией"""
     
     RESULTS_PER_PAGE = 20  # Показываем по 20 за раз
@@ -563,17 +607,25 @@ async def show_results_function(context, user_id, filtered, start_index=0):
         if description:
             text += f"\n📝 {description}\n"
         
-        # Контакты - сначала телефон
-        text += f"\n📞 {apt.get('Телефон', 'не указан')}\n"
-        
-        # Потом имя хозяина (если есть)
-        owner = apt.get('Имя_хозяина', '').strip()
-        if owner:
-            text += f"👤 {owner}\n"
-        
+        # Добавляем "ажиотажный" счетчик просмотров
+        apt_key = build_apartment_key(apt)
+        views_count = get_fake_views_count(apt_key)
+        text += f"\n🔥 Этот вариант смотрели {views_count} раз\n"
+
+        if show_contacts:
+            # Контакты - сначала телефон
+            text += f"\n📞 {apt.get('Телефон', 'не указан')}\n"
+
+            # Потом имя хозяина (если есть)
+            owner = apt.get('Имя_хозяина', '').strip()
+            if owner:
+                text += f"👤 {owner}\n"
+        else:
+            text += "\n🔒 Контакты доступны после активации подписки\n"
+
         # VK ссылка с красивым текстом
         vk_link = apt.get('VK_ссылка', '').strip()
-        if vk_link and vk_link.startswith('http'):
+        if show_vk and vk_link and vk_link.startswith('http'):
             text += f"\n🔗 Подробнее здесь: {vk_link}"
 
         # Если есть фото
@@ -600,7 +652,7 @@ async def show_results_function(context, user_id, filtered, start_index=0):
     # Проверяем есть ли еще результаты
     remaining = total_results - end_index
     
-    if remaining > 0:
+    if remaining > 0 and show_contacts:
         # Есть еще результаты - показываем кнопку "Показать еще"
         # Сохраняем данные для следующей порции
         user_pagination_data[user_id] = {
@@ -610,6 +662,7 @@ async def show_results_function(context, user_id, filtered, start_index=0):
         
         keyboard = [
             [InlineKeyboardButton(f"📋 Показать еще {remaining}", callback_data='show_more')],
+            [InlineKeyboardButton("🔔 Подписаться на новые", callback_data='alerts_subscribe')],
             [InlineKeyboardButton("🔍 Новый поиск", callback_data='new_search')]
         ]
         
@@ -618,15 +671,98 @@ async def show_results_function(context, user_id, filtered, start_index=0):
             text=f"✅ Показано {end_index} из {total_results} вариантов",
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
-    else:
+    elif show_contacts:
         # Все результаты показаны
         await context.bot.send_message(
             chat_id=user_id,
             text="✅ Все результаты показаны!",
             reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton("🔔 Подписаться на новые", callback_data='alerts_subscribe')
+            ], [
                 InlineKeyboardButton("🔍 Новый поиск", callback_data='new_search')
             ]])
         )
+
+
+async def show_preview_results_function(context, user_id, filtered):
+    """Показывает бесплатный превью: до 2 вариантов без контактов и без VK."""
+    preview_items = filtered[:PREVIEW_RESULTS_LIMIT]
+
+    if not preview_items:
+        return
+
+    await context.bot.send_message(
+        chat_id=user_id,
+        text=(
+            f"👀 Бесплатный превью: {len(preview_items)} из {len(filtered)} вариантов\n\n"
+            f"Показываю примеры без контактов и без ссылок."
+        )
+    )
+
+    await show_results_function(
+        context,
+        user_id,
+        preview_items,
+        start_index=0,
+        show_contacts=False,
+        show_vk=False
+    )
+
+
+async def subscribe_alerts_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Включает уведомления о новых объявлениях."""
+    query = update.callback_query
+    await query.answer()
+    user_id = query.from_user.id
+
+    has_subscription, _ = db.check_subscription(user_id)
+    if not has_subscription:
+        await query.edit_message_text(
+            "🔒 Уведомления о новых вариантах доступны только при активной подписке.",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("💳 Купить подписку", callback_data='buy_1_day')]])
+        )
+        return
+
+    db.set_alert_subscription(user_id, True)
+    await seed_seen_apartments_for_user(user_id)
+
+    await query.edit_message_text(
+        "🔔 Готово! Теперь буду присылать новые объявления автоматически."
+    )
+
+
+async def check_new_apartments_job(context: ContextTypes.DEFAULT_TYPE):
+    """Периодически проверяет новые объявления и рассылает уведомления подписчикам."""
+    user_ids = db.get_alert_subscribers()
+    if not user_ids:
+        return
+
+    all_apartments = sheets.read_apartments()
+    keyed_apartments = {build_apartment_key(apt): apt for apt in all_apartments}
+    all_keys = set(keyed_apartments.keys())
+
+    for user_id in user_ids:
+        has_subscription, _ = db.check_subscription(user_id)
+        if not has_subscription:
+            db.set_alert_subscription(user_id, False)
+            continue
+
+        seen_keys = db.get_seen_apartment_keys(user_id)
+        new_keys = [key for key in all_keys if key not in seen_keys]
+        if not new_keys:
+            continue
+
+        db.add_seen_apartments(user_id, new_keys)
+        new_apartments = [keyed_apartments[key] for key in new_keys[:NOTIFICATION_NEW_ITEMS_LIMIT]]
+
+        try:
+            await context.bot.send_message(
+                chat_id=user_id,
+                text=f"🆕 Появились новые объявления: {len(new_keys)} шт. Показываю свежие:"
+            )
+            await show_results_function(context, user_id, new_apartments, show_contacts=True, show_vk=True)
+        except Exception as e:
+            logger.error(f"Ошибка отправки уведомления о новых объявлениях для user_id={user_id}: {e}")
 
 
 async def select_location(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -682,6 +818,9 @@ async def select_location(update: Update, context: ContextTypes.DEFAULT_TYPE):
             # Если нет подписки - показываем количество и предлагаем оплатить
             # Сохраняем результаты для показа после оплаты
             user_search_results[user_id] = filtered
+
+            # Бесплатный превью (без контактов и VK)
+            await show_preview_results_function(context, user_id, filtered)
             
             keyboard = [
                 [InlineKeyboardButton(f"💳 {TARIFFS['1_day']['name']} - {TARIFFS['1_day']['price']}₽",
@@ -697,7 +836,7 @@ async def select_location(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await context.bot.send_message(
                 chat_id=user_id,
                 text=f"✅ Найдено вариантов: {len(filtered)}\n\n"
-                     f"Для просмотра контактов и фотографий жилья нужна подписка.\n\n"
+                     f"Полный доступ к контактам и всем объявлениям открывается по подписке.\n\n"
                      f"Выбери тариф:",
                 reply_markup=reply_markup
             )
@@ -926,6 +1065,9 @@ async def select_distance(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Если нет подписки - показываем количество и предлагаем оплатить
         # Сохраняем результаты для показа после оплаты
         user_search_results[user_id] = filtered
+
+        # Бесплатный превью (без контактов и VK)
+        await show_preview_results_function(context, user_id, filtered)
         
         keyboard = [
             [InlineKeyboardButton(f"💳 {TARIFFS['1_day']['name']} - {TARIFFS['1_day']['price']}₽",
@@ -941,7 +1083,7 @@ async def select_distance(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await context.bot.send_message(
             chat_id=user_id,
             text=f"✅ Найдено вариантов: {len(filtered)}\n\n"
-                 f"Для просмотра контактов и фотографий жилья нужна подписка.\n\n"
+                 f"Полный доступ к контактам и всем объявлениям открывается по подписке.\n\n"
                  f"Выбери тариф:",
             reply_markup=reply_markup
         )
@@ -1317,12 +1459,21 @@ def main():
     application.add_handler(CallbackQueryHandler(go_start_handler, pattern='^go_start$'))
     application.add_handler(CallbackQueryHandler(new_search_handler, pattern='^new_search$'))
     application.add_handler(CallbackQueryHandler(show_more_handler, pattern='^show_more$'))
+    application.add_handler(CallbackQueryHandler(subscribe_alerts_handler, pattern='^alerts_subscribe$'))
 
     # Админские команды
     application.add_handler(CommandHandler('activate', activate_user))
     application.add_handler(CommandHandler('check', check_user))
     application.add_handler(CommandHandler('stats', show_stats))
     application.add_handler(CommandHandler('pending', show_pending))
+
+    # Фоновая проверка новых объявлений для подписчиков уведомлений
+    application.job_queue.run_repeating(
+        check_new_apartments_job,
+        interval=NOTIFICATION_CHECK_INTERVAL_SECONDS,
+        first=30,
+        name='new_apartments_checker'
+    )
 
     # Запускаем бота
     logger.info("Бот запущен!")
