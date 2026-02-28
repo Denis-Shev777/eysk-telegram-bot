@@ -1,7 +1,12 @@
-python-telegram-bot[job-queue]==21.7
-requests==2.31.0
+# VK Bot (основной)
+vkbottle==4.3.8
+aiohttp>=3.9.0
+
+# Данные и хранилище
 openpyxl==3.1.2
 pytz
 python-dotenv
 
-# Force rebuild for Stars/USDT payment integration
+# Telegram Bot (оставлен на случай параллельного запуска)
+python-telegram-bot[job-queue]==21.7
+requests==2.31.0
