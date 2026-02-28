@@ -1,7 +1,5 @@
 # secrets
-.env
 tg token.txt
-.env
 
 # runtime data
 users.db
