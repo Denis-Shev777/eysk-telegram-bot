@@ -1,1 +1,1 @@
-web: python Eysk_bot.py
+web: python vk_bot.py

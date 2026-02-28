@@ -28,15 +28,25 @@ def _get_env(
         )
     return value
 
-# Telegram Bot Token (получен от @BotFather)
-BOT_TOKEN = _get_env("BOT_TOKEN", allow_whitespace=False)
+# Telegram Bot Token (получен от @BotFather) — нужен только для Telegram-бота
+BOT_TOKEN = _get_env("BOT_TOKEN", required=False, allow_whitespace=False)
 
-# ID администратора (твой Telegram ID)
-_admin_id_raw = _get_env("ADMIN_ID", allow_whitespace=False)
+# ID администратора в Telegram — нужен только для Telegram-бота
+_admin_id_raw = _get_env("ADMIN_ID", required=False, allow_whitespace=False)
 try:
-    ADMIN_ID = int(_admin_id_raw)
+    ADMIN_ID = int(_admin_id_raw) if _admin_id_raw else None
 except ValueError as exc:
     raise ValueError("Переменная окружения ADMIN_ID должна быть числом") from exc
+
+# ВКонтакте: токен сообщества (Управление → Настройки → Работа с API)
+VK_TOKEN = _get_env("VK_TOKEN", required=False, allow_whitespace=False)
+
+# ВКонтакте: VK user_id администратора (твой личный ID ВКонтакте)
+_admin_vk_id_raw = _get_env("ADMIN_VK_ID", required=False, allow_whitespace=False)
+try:
+    ADMIN_VK_ID = int(_admin_vk_id_raw) if _admin_vk_id_raw else None
+except ValueError as exc:
+    raise ValueError("Переменная окружения ADMIN_VK_ID должна быть числом") from exc
 
 # Реквизиты для оплаты
 PAYMENT_CARD = _get_env("PAYMENT_CARD", required=False)
