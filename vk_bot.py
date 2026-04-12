@@ -285,12 +285,16 @@ async def show_results_function(peer_id: int, filtered: list, start_index: int =
         kb.add(Callback("🔔 Подписаться на новые", {"a": "alerts_sub"}))
         kb.row()
         kb.add(Callback("🔍 Новый поиск", {"a": "new_search"}))
+        kb.row()
+        kb.add(Callback("📋 Написать сообществу", {"a": "post_announcement"}))
         await send_msg(peer_id, f"✅ Показано {end_index} из {total_results} вариантов", kb)
     elif show_contacts:
         kb = Keyboard(inline=True)
         kb.add(Callback("🔔 Подписаться на новые", {"a": "alerts_sub"}))
         kb.row()
         kb.add(Callback("🔍 Новый поиск", {"a": "new_search"}))
+        kb.row()
+        kb.add(Callback("📋 Написать сообществу", {"a": "post_announcement"}))
         await send_msg(peer_id, "✅ Все результаты показаны!", kb)
 
 
