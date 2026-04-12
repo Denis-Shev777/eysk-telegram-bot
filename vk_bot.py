@@ -436,9 +436,10 @@ async def handle_free_message(message: Message):
         await send_msg(
             ADMIN_VK_ID,
             f"📩 Сообщение от пользователя!\n\n"
-            f"Имя: {first_name}\n"
-            f"VK ID: {user_id}\n\n"
-            f"Текст:\n{text}"
+            f"👤 [id{user_id}|{first_name}]\n"
+            f"🔗 vk.com/id{user_id}\n\n"
+            f"💬 Текст:\n{text}\n\n"
+            f"↩️ Чтобы ответить — перейди в Сообщения сообщества и найди диалог с этим пользователем."
         )
     except Exception as e:
         logger.error(f"Ошибка пересылки сообщения администратору: {e}")
