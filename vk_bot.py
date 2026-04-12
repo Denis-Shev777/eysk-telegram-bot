@@ -105,7 +105,7 @@ def kb_main_menu() -> Keyboard:
     kb = Keyboard(inline=True)
     kb.add(Callback("🔍 Найти жильё через бота", {"a": "search_housing"}))
     kb.row()
-    kb.add(Callback("📋 Написать сообществу", {"a": "post_announcement"}))
+    kb.add(Callback("📋 Написать сообществу (администратору)", {"a": "post_announcement"}))
     return kb
 
 
@@ -287,7 +287,7 @@ async def show_results_function(peer_id: int, filtered: list, start_index: int =
         kb.row()
         kb.add(Callback("🔍 Новый поиск", {"a": "new_search"}))
         kb.row()
-        kb.add(Callback("📋 Написать сообществу", {"a": "post_announcement"}))
+        kb.add(Callback("📋 Написать сообществу (администратору)", {"a": "post_announcement"}))
         await send_msg(peer_id, f"✅ Показано {end_index} из {total_results} вариантов", kb)
     elif show_contacts:
         kb = Keyboard(inline=True)
@@ -295,7 +295,7 @@ async def show_results_function(peer_id: int, filtered: list, start_index: int =
         kb.row()
         kb.add(Callback("🔍 Новый поиск", {"a": "new_search"}))
         kb.row()
-        kb.add(Callback("📋 Написать сообществу", {"a": "post_announcement"}))
+        kb.add(Callback("📋 Написать сообществу (администратору)", {"a": "post_announcement"}))
         await send_msg(peer_id, "✅ Все результаты показаны!", kb)
 
 
@@ -895,7 +895,7 @@ async def handle_callback(event: dict):
     elif action == 'post_announcement':
         user_writing_to_community.add(user_id)
         kb = Keyboard(inline=True)
-        kb.add(Callback("❌ Отмена", {"a": "cancel_community_msg"}))
+        kb.add(Callback("🔙 Назад", {"a": "cancel_community_msg"}))
         await edit_msg(
             peer_id, cmid,
             "✍️ Напишите ваше сообщение следующим сообщением.\n\n"
