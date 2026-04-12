@@ -398,23 +398,6 @@ async def cmd_stats(message: Message):
     await message.answer(text)
 
 
-@bot.on.message(text="/reply <uid> <text>")
-async def cmd_reply(message: Message, uid: str, text: str):
-    if message.from_id != ADMIN_VK_ID:
-        return
-    try:
-        target_id = int(uid)
-    except ValueError:
-        await message.answer("❌ Формат: /reply <vk_user_id> <текст ответа>\nПример: /reply 347711382 Добрый день!")
-        return
-    try:
-        await send_msg(target_id, f"💬 Ответ администратора:\n\n{text}")
-        await message.answer(f"✅ Ответ отправлен пользователю [id{target_id}|vk.com/id{target_id}]")
-    except Exception as e:
-        logger.error(f"Ошибка отправки ответа пользователю {target_id}: {e}")
-        await message.answer(f"❌ Не удалось отправить ответ: {e}")
-
-
 @bot.on.message(text="/pending")
 async def cmd_pending(message: Message):
     if message.from_id != ADMIN_VK_ID:
@@ -436,7 +419,7 @@ async def cmd_pending(message: Message):
     await message.answer(text)
 
 
-# ─────────────────── Catch-all: пересылка сообщений администратору ───────────────────
+# ─────────────────── Catch-all: приём сообщений для администратора ───────────────────
 
 @bot.on.message()
 async def handle_free_message(message: Message):
@@ -444,7 +427,7 @@ async def handle_free_message(message: Message):
     text_lower = (message.text or "").strip().lower()
 
     # Пропускаем все известные команды — их обработают другие хэндлеры
-    known = ["/start", "/search", "/activate", "/check", "/stats", "/pending", "/reply",
+    known = ["/start", "/search", "/activate", "/check", "/stats", "/pending",
              "начать", "старт", "поиск"]
     if any(text_lower == cmd or text_lower.startswith(cmd + " ") for cmd in known):
         return
@@ -453,21 +436,8 @@ async def handle_free_message(message: Message):
         return
 
     user_writing_to_community.discard(user_id)
-    first_name = await get_user_first_name(user_id)
-    text = message.text or "(пустое сообщение)"
-
-    # Пересылаем администратору
-    try:
-        await send_msg(
-            ADMIN_VK_ID,
-            f"📩 Сообщение от пользователя!\n\n"
-            f"👤 [id{user_id}|{first_name}]\n"
-            f"🔗 vk.com/id{user_id}\n\n"
-            f"💬 Текст:\n{text}\n\n"
-            f"↩️ Чтобы ответить, напиши:\n/reply {user_id} <твой ответ>"
-        )
-    except Exception as e:
-        logger.error(f"Ошибка пересылки сообщения администратору: {e}")
+    # Сообщение уже видно администратору в Управление → Сообщения.
+    # Дополнительная пересылка не нужна.
 
     # Подтверждаем пользователю
     kb = Keyboard(inline=True)
