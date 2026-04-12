@@ -398,6 +398,23 @@ async def cmd_stats(message: Message):
     await message.answer(text)
 
 
+@bot.on.message(text="/reply <uid> <text>")
+async def cmd_reply(message: Message, uid: str, text: str):
+    if message.from_id != ADMIN_VK_ID:
+        return
+    try:
+        target_id = int(uid)
+    except ValueError:
+        await message.answer("❌ Формат: /reply <vk_user_id> <текст ответа>\nПример: /reply 347711382 Добрый день!")
+        return
+    try:
+        await send_msg(target_id, f"💬 Ответ администратора:\n\n{text}")
+        await message.answer(f"✅ Ответ отправлен пользователю [id{target_id}|vk.com/id{target_id}]")
+    except Exception as e:
+        logger.error(f"Ошибка отправки ответа пользователю {target_id}: {e}")
+        await message.answer(f"❌ Не удалось отправить ответ: {e}")
+
+
 @bot.on.message(text="/pending")
 async def cmd_pending(message: Message):
     if message.from_id != ADMIN_VK_ID:
@@ -439,7 +456,7 @@ async def handle_free_message(message: Message):
             f"👤 [id{user_id}|{first_name}]\n"
             f"🔗 vk.com/id{user_id}\n\n"
             f"💬 Текст:\n{text}\n\n"
-            f"↩️ Чтобы ответить — перейди в Сообщения сообщества и найди диалог с этим пользователем."
+            f"↩️ Чтобы ответить, напиши:\n/reply {user_id} <твой ответ>"
         )
     except Exception as e:
         logger.error(f"Ошибка пересылки сообщения администратору: {e}")
