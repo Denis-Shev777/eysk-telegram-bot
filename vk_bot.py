@@ -100,6 +100,14 @@ async def get_user_first_name(user_id: int) -> str:
 
 # ─────────────────── Сборка клавиатур ───────────────────
 
+def kb_main_menu() -> Keyboard:
+    kb = Keyboard(inline=True)
+    kb.add(Callback("🔍 Найти жильё через бота", {"a": "search_housing"}))
+    kb.row()
+    kb.add(Callback("📋 Написать сообществу", {"a": "post_announcement"}))
+    return kb
+
+
 def kb_location() -> Keyboard:
     kb = Keyboard(inline=True)
     kb.add(Callback("🏖️ Ейск", {"a": "loc_ейск"}))
@@ -311,11 +319,10 @@ async def cmd_start(message: Message):
     has_subscription, end_date = db.check_subscription(user_id)
     welcome = WELCOME_TEXT
     if has_subscription:
-        welcome += f"\n\n✅ Подписка активна до {end_date.strftime('%d.%m.%Y %H:%M')}"
+        welcome += f"\n✅ Подписка активна до {end_date.strftime('%d.%m.%Y %H:%M')}\n"
 
-    await send_msg(user_id, welcome)
     user_filters[user_id] = {}
-    await send_msg(user_id, "🔍 Давай найдём идеальное жильё!\n\n1️⃣ Выбери населённый пункт:", kb_location())
+    await send_msg(user_id, welcome, kb_main_menu())
 
 
 @bot.on.message(text=["/search", "Поиск", "поиск"])
@@ -836,10 +843,27 @@ async def handle_callback(event: dict):
         has_sub, end_date = db.check_subscription(user_id)
         welcome = WELCOME_TEXT
         if has_sub:
-            welcome += f"\n\n✅ Подписка активна до {end_date.strftime('%d.%m.%Y %H:%M')}"
+            welcome += f"\n✅ Подписка активна до {end_date.strftime('%d.%m.%Y %H:%M')}\n"
         user_filters[user_id] = {}
-        await edit_msg(peer_id, cmid, welcome)
-        await send_msg(peer_id, "🔍 Давай найдём идеальное жильё!\n\n1️⃣ Выбери населённый пункт:", kb_location())
+        await edit_msg(peer_id, cmid, welcome, kb_main_menu())
+
+    # ── Найти жильё через бота ──
+    elif action == 'search_housing':
+        user_filters[user_id] = {}
+        await edit_msg(peer_id, cmid, "🔍 Давай найдём идеальное жильё!\n\n1️⃣ Выбери населённый пункт:", kb_location())
+
+    # ── Написать сообществу ──
+    elif action == 'post_announcement':
+        kb = Keyboard(inline=True)
+        kb.add(Callback("🔙 Назад", {"a": "go_start"}))
+        await edit_msg(
+            peer_id, cmid,
+            "📋 Хотите разместить объявление?\n\n"
+            "Перейдите на страницу нашего сообщества и нажмите:\n"
+            "«Ещё» → «Предложить запись»\n\n"
+            "Ваше объявление будет рассмотрено и опубликовано администратором.",
+            kb
+        )
 
     # ── Новый поиск ──
     elif action == 'new_search':
