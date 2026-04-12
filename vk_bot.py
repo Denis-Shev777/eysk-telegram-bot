@@ -441,6 +441,14 @@ async def cmd_pending(message: Message):
 @bot.on.message()
 async def handle_free_message(message: Message):
     user_id = message.from_id
+    text_lower = (message.text or "").strip().lower()
+
+    # Пропускаем все известные команды — их обработают другие хэндлеры
+    known = ["/start", "/search", "/activate", "/check", "/stats", "/pending", "/reply",
+             "начать", "старт", "поиск"]
+    if any(text_lower == cmd or text_lower.startswith(cmd + " ") for cmd in known):
+        return
+
     if user_id not in user_writing_to_community:
         return
 
