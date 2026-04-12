@@ -419,29 +419,25 @@ async def cmd_pending(message: Message):
     await message.answer(text)
 
 
-# ─────────────────── Catch-all: пересылка сообщений администратору ───────────────────
+# ─────────────────── Catch-all: приём сообщений для администратора ───────────────────
 
 @bot.on.message()
 async def handle_free_message(message: Message):
     user_id = message.from_id
+    text_lower = (message.text or "").strip().lower()
+
+    # Пропускаем все известные команды — их обработают другие хэндлеры
+    known = ["/start", "/search", "/activate", "/check", "/stats", "/pending",
+             "начать", "старт", "поиск"]
+    if any(text_lower == cmd or text_lower.startswith(cmd + " ") for cmd in known):
+        return
+
     if user_id not in user_writing_to_community:
         return
 
     user_writing_to_community.discard(user_id)
-    first_name = await get_user_first_name(user_id)
-    text = message.text or "(пустое сообщение)"
-
-    # Пересылаем администратору
-    try:
-        await send_msg(
-            ADMIN_VK_ID,
-            f"📩 Сообщение от пользователя!\n\n"
-            f"Имя: {first_name}\n"
-            f"VK ID: {user_id}\n\n"
-            f"Текст:\n{text}"
-        )
-    except Exception as e:
-        logger.error(f"Ошибка пересылки сообщения администратору: {e}")
+    # Сообщение уже видно администратору в Управление → Сообщения.
+    # Дополнительная пересылка не нужна.
 
     # Подтверждаем пользователю
     kb = Keyboard(inline=True)
