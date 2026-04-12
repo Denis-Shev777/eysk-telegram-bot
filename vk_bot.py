@@ -42,6 +42,7 @@ bot = Bot(token=VK_TOKEN)
 user_filters = {}
 user_pagination_data = {}
 user_search_results = {}
+user_writing_to_community = set()  # пользователи в режиме "написать сообществу"
 
 # Константы
 PREVIEW_RESULTS_LIMIT = 2
@@ -416,6 +417,40 @@ async def cmd_pending(message: Message):
             f"Активировать: /activate {uid} {days}\n\n"
         )
     await message.answer(text)
+
+
+# ─────────────────── Catch-all: пересылка сообщений администратору ───────────────────
+
+@bot.on.message()
+async def handle_free_message(message: Message):
+    user_id = message.from_id
+    if user_id not in user_writing_to_community:
+        return
+
+    user_writing_to_community.discard(user_id)
+    first_name = await get_user_first_name(user_id)
+    text = message.text or "(пустое сообщение)"
+
+    # Пересылаем администратору
+    try:
+        await send_msg(
+            ADMIN_VK_ID,
+            f"📩 Сообщение от пользователя!\n\n"
+            f"Имя: {first_name}\n"
+            f"VK ID: {user_id}\n\n"
+            f"Текст:\n{text}"
+        )
+    except Exception as e:
+        logger.error(f"Ошибка пересылки сообщения администратору: {e}")
+
+    # Подтверждаем пользователю
+    kb = Keyboard(inline=True)
+    kb.add(Callback("🏠 В начало", {"a": "go_start"}))
+    await send_msg(
+        user_id,
+        "✅ Ваше сообщение отправлено администратору!\n\nМы ответим вам в ближайшее время.",
+        kb
+    )
 
 
 # ─────────────────── Обработчик callback-кнопок ───────────────────
@@ -858,16 +893,25 @@ async def handle_callback(event: dict):
 
     # ── Написать сообществу ──
     elif action == 'post_announcement':
+        user_writing_to_community.add(user_id)
         kb = Keyboard(inline=True)
-        kb.add(Callback("🔙 Назад", {"a": "go_start"}))
+        kb.add(Callback("❌ Отмена", {"a": "cancel_community_msg"}))
         await edit_msg(
             peer_id, cmid,
-            "📋 Хотите разместить объявление?\n\n"
-            "Перейдите на страницу нашего сообщества и нажмите:\n"
-            "«Ещё» → «Предложить запись»\n\n"
-            "Ваше объявление будет рассмотрено и опубликовано администратором.",
+            "✍️ Напишите ваше сообщение следующим сообщением.\n\n"
+            "Администратор получит его и ответит вам.",
             kb
         )
+
+    # ── Отмена написания сообщества ──
+    elif action == 'cancel_community_msg':
+        user_writing_to_community.discard(user_id)
+        has_sub, end_date = db.check_subscription(user_id)
+        welcome = WELCOME_TEXT
+        if has_sub:
+            welcome += f"\n✅ Подписка активна до {end_date.strftime('%d.%m.%Y %H:%M')}\n"
+        user_filters[user_id] = {}
+        await edit_msg(peer_id, cmid, welcome, kb_main_menu())
 
     # ── Новый поиск ──
     elif action == 'new_search':
