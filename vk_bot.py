@@ -119,10 +119,9 @@ def kb_location() -> str:
 
 def kb_subscription() -> str:
     return make_keyboard([
-        [(f"💳 {TARIFFS['1_day']['name']} — {TARIFFS['1_day']['price']}₽", {"a": "buy_1_day"})],
-        [(f"💳 {TARIFFS['7_days']['name']} — {TARIFFS['7_days']['price']}₽", {"a": "buy_7_days"})],
-        [(f"💳 {TARIFFS['30_days']['name']} — {TARIFFS['30_days']['price']}₽", {"a": "buy_30_days"})],
-        [("🔍 Новый поиск", {"a": "new_search"})],
+        [(f"💳 {TARIFFS['1_month']['name']} — {TARIFFS['1_month']['price']}₽", {"a": "buy_1_month"})],
+        [(f"💳 {TARIFFS['3_months']['name']} — {TARIFFS['3_months']['price']}₽", {"a": "buy_3_months"})],
+        [("🔍 Новый поиск", {"a": "new_search"}), ("🔙 Назад", {"a": "go_start"})],
     ])
 
 
@@ -700,7 +699,7 @@ def process_action(user_id: int, peer_id: int, cmid: int, action: str):
         has_sub, _ = db.check_subscription(user_id)
         if not has_sub:
             edit_msg(peer_id, cmid, "🔒 Уведомления доступны только при активной подписке.",
-                     make_keyboard([[("💳 Купить подписку", {"a": "buy_1_day"})]]))
+                     make_keyboard([[("💳 Купить подписку", {"a": "buy_1_month"})]]))
             return
         db.set_alert_subscription(user_id, True)
         seed_seen_apartments_for_user(user_id)
