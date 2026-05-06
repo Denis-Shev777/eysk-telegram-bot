@@ -148,7 +148,14 @@ def send_msg(peer_id: int, text: str, keyboard: str = None, attachment: str = No
     try:
         vk.messages.send(**kwargs)
     except Exception as e:
-        logger.error(f"Ошибка отправки сообщения peer={peer_id}: {e}")
+        logger.error(f"Ошибка отправки сообщения peer={peer_id} keyboard={'да' if keyboard else 'нет'}: {e}")
+        if keyboard:
+            # Пробуем отправить без клавиатуры чтобы пользователь хотя бы увидел текст
+            try:
+                kwargs.pop("keyboard")
+                vk.messages.send(**kwargs)
+            except Exception:
+                pass
 
 
 def edit_msg(peer_id: int, cmid: int, text: str, keyboard: str = None):
@@ -724,8 +731,9 @@ def process_action(user_id: int, peer_id: int, cmid: int, action: str):
     elif action == 'post_announcement':
         user_writing_to_community.add(user_id)
         edit_msg(peer_id, cmid,
-                 "✍️ Напишите ваше сообщение следующим сообщением.\n\n"
-                 "Администратор получит его и ответит вам.",
+                 "✍️ Напишите ваше сообщение администратору.\n\n"
+                 "👇 Используйте строку «Сообщение» внизу экрана и отправьте его.\n\n"
+                 "Администратор ответит вам в ближайшее время.",
                  make_keyboard([[("🔙 Назад", {"a": "cancel_community_msg"})]]))
 
     # ── Отмена написания сообществу ──
