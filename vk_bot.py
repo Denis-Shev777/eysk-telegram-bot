@@ -148,7 +148,14 @@ def send_msg(peer_id: int, text: str, keyboard: str = None, attachment: str = No
     try:
         vk.messages.send(**kwargs)
     except Exception as e:
-        logger.error(f"Ошибка отправки сообщения peer={peer_id}: {e}")
+        logger.error(f"Ошибка отправки сообщения peer={peer_id} keyboard={'да' if keyboard else 'нет'}: {e}")
+        if keyboard:
+            # Пробуем отправить без клавиатуры чтобы пользователь хотя бы увидел текст
+            try:
+                kwargs.pop("keyboard")
+                vk.messages.send(**kwargs)
+            except Exception:
+                pass
 
 
 def edit_msg(peer_id: int, cmid: int, text: str, keyboard: str = None):
