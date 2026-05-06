@@ -5,10 +5,6 @@ Eysk VK Bot - Поиск жилья в Ейске и Должанской
 Портирован с Telegram на ВКонтакте
 """
 
-import subprocess
-import sys
-subprocess.check_call([sys.executable, "-m", "pip", "install", "-r", "requirements.txt", "-q"])
-
 import asyncio
 import logging
 import random
