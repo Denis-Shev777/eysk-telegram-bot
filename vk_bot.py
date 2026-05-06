@@ -731,8 +731,9 @@ def process_action(user_id: int, peer_id: int, cmid: int, action: str):
     elif action == 'post_announcement':
         user_writing_to_community.add(user_id)
         edit_msg(peer_id, cmid,
-                 "✍️ Напишите ваше сообщение следующим сообщением.\n\n"
-                 "Администратор получит его и ответит вам.",
+                 "✍️ Напишите ваше сообщение администратору.\n\n"
+                 "👇 Используйте строку «Сообщение» внизу экрана и отправьте его.\n\n"
+                 "Администратор ответит вам в ближайшее время.",
                  make_keyboard([[("🔙 Назад", {"a": "cancel_community_msg"})]]))
 
     # ── Отмена написания сообществу ──
