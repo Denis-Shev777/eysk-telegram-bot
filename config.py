@@ -60,27 +60,18 @@ USDT_WALLET = _get_env("USDT_WALLET", required=False)
 
 # Тарифы (в рублях, stars и USDT)
 TARIFFS = {
-    "1_day": {
+    "1_month": {
         "price": 99,
-        "price_stars": 80,   # Цена в Telegram Stars
-        "price_usdt": 1.5,   # Цена в USDT
-        "days": 1,
-        "name": "1 день"
-    },
-    "7_days": {
-        "price": 299,
-        "price_stars": 250,  # Цена в Telegram Stars
-        "price_usdt": 5,     # Цена в USDT
-        "days": 7,
-        "name": "7 дней"
-    },
-    "30_days": {
-        "price": 499,
-        "price_stars": 400,  # Цена в Telegram Stars
-        "price_usdt": 7.5,   # Цена в USDT
+        "price_usdt": 1.5,
         "days": 30,
-        "name": "30 дней"
-    }
+        "name": "1 месяц"
+    },
+    "3_months": {
+        "price": 299,
+        "price_usdt": 4,
+        "days": 90,
+        "name": "3 месяца"
+    },
 }
 
 # Текст приветствия
